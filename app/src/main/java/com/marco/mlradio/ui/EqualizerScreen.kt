@@ -1,6 +1,11 @@
 package com.marco.mlradio.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -107,7 +112,6 @@ private fun fmtFreqLong(f: Float): String =
 @Composable
 fun EqualizerScreen(env: AppEnv) {
     val settings = env.settings
-    val eq = settings.eq
     // L'equalizzatore ha uno sfondo scuro fisso: icone chiare nella barra di stato finché è aperto.
     val appDark = LocalDarkTheme.current
     val eqView = androidx.compose.ui.platform.LocalView.current
@@ -121,6 +125,7 @@ fun EqualizerScreen(env: AppEnv) {
             c?.isAppearanceLightNavigationBars = !appDark
         }
     }
+    val eq = settings.eq
     val info = env.engine.eqProcessor.info
     var mode by remember { mutableIntStateOf(0) } // 0 = Eq., 1 = Tono, 2 = Limite
     var target by remember { mutableStateOf<FreqTarget?>(null) }
@@ -183,11 +188,9 @@ fun EqualizerScreen(env: AppEnv) {
                 .height(52.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = { env.showEq = false }) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Indietro", tint = Color.White)
-            }
+            Spacer(Modifier.width(8.dp))
             Text(
-                "Equalizzatore", color = Color.White, fontSize = 20.sp,
+                "MLRadio", color = Color.White, fontSize = 20.sp,
                 fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)
             )
             Text(if (eq.enabled) "Attivo" else "Spento", color = Color(0xFF9AA0AA), fontSize = 13.sp)
@@ -201,6 +204,9 @@ fun EqualizerScreen(env: AppEnv) {
             )
             Spacer(Modifier.width(4.dp))
         }
+
+        PlayerBar(env)
+        Spacer(Modifier.height(6.dp))
 
         // preamp fisso + bande scorrevoli
         Row(Modifier.fillMaxWidth().weight(1f)) {
@@ -278,6 +284,7 @@ fun EqualizerScreen(env: AppEnv) {
             ) {
                 ModeButton("Eq.", mode == 0, Modifier.weight(1f)) { env.feedback.tapScreen(); mode = 0 }
                 ModeButton("Tono", mode == 1, Modifier.weight(1f)) { env.feedback.tapScreen(); mode = 1 }
+                ModeButton("Param.", mode == 3, Modifier.weight(1f)) { env.feedback.tapScreen(); mode = 3 }
                 ModeButton("Limite", mode == 2, Modifier.weight(1f)) { env.feedback.tapScreen(); mode = 2 }
             }
             Spacer(Modifier.width(8.dp))
@@ -312,7 +319,6 @@ fun EqualizerScreen(env: AppEnv) {
                                 settings.updateEq { c -> c.copy(gains = List(c.bandCount) { 0f }, preampDb = 0f) }
                                 moreMenu = false
                             }
-                            MenuRow("Q automatico") { settings.updateEq { it.withAutoQ() }; moreMenu = false }
                             MenuRow("Salva come preimpostazione") { saveName = ""; saveDialog = true; moreMenu = false }
                         }
                     }
@@ -322,6 +328,7 @@ fun EqualizerScreen(env: AppEnv) {
                     when (mode) {
                         0 -> BandsPanel(env, eq)
                         1 -> TonePanel(env, eq) { target = it }
+                        3 -> ParamsPanel(env, eq)
                         else -> LimiterPanel(env, eq)
                     }
                 }
@@ -424,7 +431,7 @@ fun EqualizerScreen(env: AppEnv) {
     }
 }
 
-private val NeonGreen = Color(0xFF00E676)
+internal val NeonGreen = Color(0xFF00E676)
 
 /** Interruttore nel tema dell'equalizzatore (verde neon su grafite). */
 @Composable
@@ -450,7 +457,7 @@ private fun NeonSwitch(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
 
 /** Slider orizzontale sottile, con linea neon e maniglia chiara come gli slider delle bande. */
 @Composable
-private fun NeonSlider(
+internal fun NeonSlider(
     value: Float,
     onValueChange: (Float) -> Unit,
     valueRange: ClosedFloatingPointRange<Float>,
@@ -589,7 +596,7 @@ private fun BandsPanel(env: AppEnv, eq: EqConfig) {
         }
         Spacer(Modifier.height(10.dp))
         Text(
-            "Tocca la frequenza sotto uno slider per cambiare frequenza e Q. Doppio tocco: azzera la banda.",
+            "Tocca la frequenza sotto uno slider per scrivere frequenza, guadagno e Q o cambiare il tipo di filtro. Doppio tocco: azzera la banda.",
             color = Color(0xFF7C828C), fontSize = 12.sp
         )
     }
@@ -605,20 +612,104 @@ private fun TonePanel(env: AppEnv, eq: EqConfig, onFreq: (FreqTarget) -> Unit) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         ToneKnob(
-            title = "Bassi", percent = eq.bassPercent, freq = eq.bassFreq, color = BassColor,
+            title = "Bassi caldi", percent = eq.bassPercent, freq = eq.bassFreq, color = BassColor,
             onTick = { env.feedback.tapScreen() },
             onDetent = { env.feedback.detent() },
             onChange = { v -> settings.updateEq { it.copy(bassPercent = v) } },
             onFreqClick = { onFreq(FreqTarget.Bass) },
         )
         ToneKnob(
-            title = "Alti", percent = eq.treblePercent, freq = eq.trebleFreq, color = Accent,
+            title = "Alti freddi", percent = eq.treblePercent, freq = eq.trebleFreq, color = Accent,
             onTick = { env.feedback.tapScreen() },
             onDetent = { env.feedback.detent() },
             onChange = { v -> settings.updateEq { it.copy(treblePercent = v) } },
             onFreqClick = { onFreq(FreqTarget.Treble) },
         )
     }
+}
+
+/** Modalità "Param.": Q automatico, curva fedele e preamp a mano. */
+@Composable
+private fun ParamsPanel(env: AppEnv, eq: EqConfig) {
+    val settings = env.settings
+    Column(
+        Modifier
+            .fillMaxSize()
+            .clip(RoundedCornerShape(14.dp))
+            .background(PanelColor)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Q automatico", color = Color.White, fontSize = 14.sp)
+                Text("Larghezza delle bande dalla loro distanza", color = Color(0xFF7C828C), fontSize = 11.sp)
+            }
+            Spacer(Modifier.width(8.dp))
+            Chip("Applica", selected = false) { env.feedback.tapScreen(); settings.updateEq { it.withAutoQ() } }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Curva fedele", color = Color.White, fontSize = 14.sp)
+                Text("La curva passa dai valori degli slider", color = Color(0xFF7C828C), fontSize = 11.sp)
+            }
+            Spacer(Modifier.width(8.dp))
+            NeonSwitch(
+                checked = eq.faithful,
+                onCheckedChange = { on -> env.feedback.tapScreen(); settings.updateEq { it.copy(faithful = on) } }
+            )
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Preamp", color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
+            NumField(
+                label = "dB", value = eq.preampDb, decimals = 1, suffix = "dB",
+                modifier = Modifier.width(120.dp)
+            ) { v -> settings.updateEq { it.withPreamp(v) } }
+        }
+        Text(
+            "Valori esatti: tocca la frequenza sotto uno slider (frequenza, guadagno, Q e tipo di filtro).",
+            color = Color(0xFF7C828C), fontSize = 11.sp
+        )
+    }
+}
+
+/** Campo numerico: il valore viene applicato con Fine o uscendo dal campo. Accetta anche la virgola. */
+@Composable
+private fun NumField(
+    label: String,
+    value: Float,
+    decimals: Int,
+    suffix: String,
+    modifier: Modifier = Modifier,
+    onCommit: (Float) -> Unit,
+) {
+    fun fmt(v: Float) = String.format(Locale.ITALY, "%.${decimals}f", v)
+    var text by remember(value) { mutableStateOf(fmt(value)) }
+    var focused by remember { mutableStateOf(false) }
+    fun commit() {
+        val v = text.replace(',', '.').trim().toFloatOrNull()
+        if (v != null && v.isFinite()) onCommit(v) else text = fmt(value)
+    }
+    OutlinedTextField(
+        value = text,
+        onValueChange = { text = it.take(8) },
+        singleLine = true,
+        label = { Text(label) },
+        suffix = { Text(suffix, color = Color(0xFF9AA0AA)) },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = { commit() }),
+        modifier = modifier.onFocusChanged { st ->
+            if (focused && !st.isFocused) commit()
+            focused = st.isFocused
+        },
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = Color.White, unfocusedTextColor = Color.White,
+            focusedLabelColor = Accent, unfocusedLabelColor = Color(0xFF9AA0AA),
+            focusedBorderColor = Accent, unfocusedBorderColor = Color(0xFF4A4E58),
+            cursorColor = Accent,
+        )
+    )
 }
 
 /** Modalità "Limite": limiter, soglia, rilascio e auto-headroom. */
@@ -1008,8 +1099,22 @@ private fun FreqDialog(
         textContentColor = Color.White,
         title = { Text(title) },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text(fmtFreqLong(current), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Accent)
+                Spacer(Modifier.height(4.dp))
+                NumField(
+                    label = "Frequenza", value = current, decimals = 0, suffix = "Hz", modifier = Modifier.fillMaxWidth()
+                ) { v ->
+                    val f = v.coerceIn(min, max)
+                    onEq(
+                        when (target) {
+                            is FreqTarget.Band -> eq.withFreq(target.index, f)
+                            FreqTarget.Bass -> eq.copy(bassFreq = f)
+                            FreqTarget.Treble -> eq.copy(trebleFreq = f)
+                        }
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
                 Spacer(Modifier.height(8.dp))
                 NeonSlider(
                     modifier = Modifier.fillMaxWidth(),
@@ -1039,6 +1144,23 @@ private fun FreqDialog(
                     val idx = target.index
                     val q = eq.qFor(idx).toFloat()
                     val qPos = (ln(q / EqConfig.MIN_Q) / ln(EqConfig.MAX_Q / EqConfig.MIN_Q)).coerceIn(0f, 1f)
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        NumField(
+                            label = "Guadagno", value = eq.gains.getOrElse(idx) { 0f }, decimals = 1, suffix = "dB",
+                            modifier = Modifier.weight(1f)
+                        ) { v -> onEq(eq.withGain(idx, v)) }
+                        NumField(
+                            label = "Q", value = q, decimals = 2, suffix = "",
+                            modifier = Modifier.weight(1f)
+                        ) { v -> onEq(eq.withQ(idx, v)) }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Chip("Shelf bassi", eq.typeAt(idx) == 0) { onEq(eq.withType(idx, 0)) }
+                        Chip("Campana", eq.typeAt(idx) == 2) { onEq(eq.withType(idx, 2)) }
+                        Chip("Shelf alti", eq.typeAt(idx) == 1) { onEq(eq.withType(idx, 1)) }
+                    }
                     Spacer(Modifier.height(14.dp))
                     Text(
                         "Q " + String.format(Locale.ITALY, "%.2f", q) + "  (larghezza: " +
