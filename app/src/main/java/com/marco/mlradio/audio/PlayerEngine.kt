@@ -465,9 +465,9 @@ class PlayerEngine(
 
     // ------------------------------------------------------------------ volume (volume di sistema)
 
-    private val audioManager: android.media.AudioManager by lazy {
-        app.getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
-    }
+    // getter (senza campo): usabile già dal blocco init
+    private val audioManager: android.media.AudioManager
+        get() = app.getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
 
     private fun syncVolume() {
         val am = audioManager
