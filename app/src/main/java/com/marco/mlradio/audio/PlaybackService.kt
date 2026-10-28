@@ -220,8 +220,8 @@ class PlaybackService : MediaLibraryService() {
                 EXPLORE_ID -> folder(EXPLORE_ID, "Esplora (tutte le radio)")
                 FAV_ID -> folder(FAV_ID, "Preferiti")
                 CUSTOM_ID -> folder(CUSTOM_ID, "Le mie radio")
-                mediaId.contains('|') -> folder(mediaId, mediaId.substringAfterLast('|').ifBlank { "Radio" })
-                else -> app.directory.find(mediaId)?.let { StationItems.browseItem(it) }
+                else -> if (mediaId.contains('|')) folder(mediaId, mediaId.substringAfterLast('|').ifBlank { "Radio" })
+                else app.directory.find(mediaId)?.let { StationItems.browseItem(it) }
             }
             return if (item != null) Futures.immediateFuture(LibraryResult.ofItem(item, null))
             else Futures.immediateFuture(LibraryResult.ofError<MediaItem>(LibraryResult.RESULT_ERROR_BAD_VALUE))
@@ -271,14 +271,13 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
-    private fun favButton(isFav: Boolean): CommandButton =
-        CommandButton.Builder()
-            .setDisplayName(if (isFav) "Togli dai preferiti" else "Metti nei preferiti")
-            .setIconResId(if (isFav) R.drawable.ic_fav_on else R.drawable.ic_fav_off)
-            .setSessionCommand(SessionCommand(CMD_FAV, Bundle.EMPTY))
-            .build()
-
     companion object {
+        fun favButton(isFav: Boolean): CommandButton =
+            CommandButton.Builder()
+                .setDisplayName(if (isFav) "Togli dai preferiti" else "Metti nei preferiti")
+                .setIconResId(if (isFav) R.drawable.ic_fav_on else R.drawable.ic_fav_off)
+                .setSessionCommand(SessionCommand(CMD_FAV, Bundle.EMPTY))
+                .build()
         private const val CMD_FAV = "com.marco.mlradio.TOGGLE_FAVORITE"
         private const val EXPLORE_ID = "mlradio_explore"
         private const val ROOT_ID = "mlradio_root"
