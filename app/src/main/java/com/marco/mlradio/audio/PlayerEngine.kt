@@ -147,9 +147,16 @@ class PlayerEngine(
         eqProcessor.setConfig(settings.eq)
         settings.onEqChanged = { cfg -> eqProcessor.setConfig(cfg) }
 
-        volume = player.deviceVolume
-        maxVolume = player.deviceInfo.maxVolume.coerceAtLeast(1)
-        muted = player.isDeviceMuted
+        syncVolume()
+        val volFilter = android.content.IntentFilter().apply {
+            addAction("android.media.VOLUME_CHANGED_ACTION")
+            addAction("android.media.STREAM_MUTE_CHANGED_ACTION")
+        }
+        androidx.core.content.ContextCompat.registerReceiver(
+            app, object : android.content.BroadcastReceiver() {
+                override fun onReceive(c: android.content.Context?, i: android.content.Intent?) = syncVolume()
+            }, volFilter, androidx.core.content.ContextCompat.RECEIVER_EXPORTED
+        )
 
         // Ultima radio ascoltata: pronta nel mini player, senza partire da sola
         Station.fromJsonString(settings.lastStationJson)?.let { currentStation = it }
@@ -232,9 +239,7 @@ class PlayerEngine(
             }
 
             override fun onDeviceVolumeChanged(v: Int, isMuted: Boolean) {
-                volume = v
-                muted = isMuted
-                maxVolume = player.deviceInfo.maxVolume.coerceAtLeast(1)
+                syncVolume()
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -460,12 +465,33 @@ class PlayerEngine(
 
     // ------------------------------------------------------------------ volume (volume di sistema)
 
+    private val audioManager: android.media.AudioManager by lazy {
+        app.getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+    }
+
+    private fun syncVolume() {
+        val am = audioManager
+        maxVolume = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+        volume = am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+        muted = am.isStreamMute(android.media.AudioManager.STREAM_MUSIC)
+    }
+
     fun changeVolume(v: Int) {
-        player.setDeviceVolume(v.coerceIn(0, maxVolume), 0)
+        val n = v.coerceIn(0, maxVolume)
+        audioManager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, n, 0)
+        if (n > 0 && audioManager.isStreamMute(android.media.AudioManager.STREAM_MUSIC)) {
+            audioManager.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.ADJUST_UNMUTE, 0)
+        }
+        syncVolume()
     }
 
     fun toggleMute() {
-        player.setDeviceMuted(!player.isDeviceMuted, 0)
+        val m = audioManager.isStreamMute(android.media.AudioManager.STREAM_MUSIC)
+        audioManager.adjustStreamVolume(
+            android.media.AudioManager.STREAM_MUSIC,
+            if (m) android.media.AudioManager.ADJUST_UNMUTE else android.media.AudioManager.ADJUST_MUTE, 0
+        )
+        syncVolume()
     }
 
     /** Collega il servizio in background (notifica, controlli multimediali, Android Auto). */
