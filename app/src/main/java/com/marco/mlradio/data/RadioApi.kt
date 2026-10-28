@@ -112,28 +112,40 @@ object RadioApi {
 
     /** Regioni/stati di un paese (il nome inglese del paese, come in elenco). Vuoto se non disponibili. */
     suspend fun states(countryName: String): List<RegionInfo> = withContext(Dispatchers.IO) {
-        val text = try {
-            get("/json/states/" + enc(countryName).replace("+", "%20"))
-        } catch (_: Exception) {
-            return@withContext emptyList()
-        }
-        try {
-            val a = JSONArray(text)
-            val collator = Collator.getInstance(Locale.ITALIAN)
-            val list = ArrayList<RegionInfo>()
-            for (i in 0 until a.length()) {
-                val o = a.optJSONObject(i) ?: continue
-                val n = o.optString("name").trim()
-                val c = o.optInt("stationcount", 0)
-                // il filtro per paese lato server può restituire anche altri paesi: tengo solo il richiesto
-                val country = o.optString("country")
-                if (country.isNotBlank() && !country.equals(countryName, ignoreCase = true)) continue
-                if (n.isNotEmpty() && c > 0) list.add(RegionInfo(n, c))
+        val c = enc(countryName).replace("+", "%20")
+        // Più percorsi: il formato accettato dal server cambia fra versioni; l'elenco completo è l'ultima risorsa.
+        val paths = listOf("/json/states/$c", "/json/states/$c/", "/json/states")
+        val merged = LinkedHashMap<String, Int>()
+        for (path in paths) {
+            val text = try {
+                get(path)
+            } catch (_: Exception) {
+                continue
             }
-            list.sortedWith { x, y -> collator.compare(x.name, y.name) }
-        } catch (_: Exception) {
-            emptyList()
+            try {
+                val a = JSONArray(text)
+                for (i in 0 until a.length()) {
+                    val o = a.optJSONObject(i) ?: continue
+                    val country = o.optString("country").trim()
+                    if (!country.equals(countryName, ignoreCase = true)) continue
+                    val cnt = o.optInt("stationcount", 0)
+                    val n = cleanRegion(o.optString("name"), countryName) ?: continue
+                    if (cnt > 0) merged[n] = (merged[n] ?: 0) + cnt
+                }
+            } catch (_: Exception) {
+            }
+            if (merged.size > 1) break
         }
+        val collator = Collator.getInstance(Locale.ITALIAN)
+        merged.map { RegionInfo(it.key, it.value) }.sortedWith { x, y -> collator.compare(x.name, y.name) }
+    }
+
+    /** Pulisce i nomi sporchi di Radio Browser: "Lombardia/Italy" -> "Lombardia"; il solo nome del paese non è una regione. */
+    fun cleanRegion(raw: String, countryName: String): String? {
+        val first = raw.split('/', ',', ';').map { it.trim() }.firstOrNull { it.isNotEmpty() } ?: return null
+        if (first.equals(countryName, ignoreCase = true)) return null
+        if (first.length < 2) return null
+        return first.replaceFirstChar { it.uppercase() }
     }
 
     private fun query(f: SearchFilter, offset: Int, limit: Int): String {
@@ -142,7 +154,6 @@ object RadioApi {
         if (f.countryCode.isNotBlank()) p += "countrycode" to f.countryCode
         if (f.state.isNotBlank()) {
             p += "state" to f.state
-            p += "state_exact" to "true"
         }
         if (f.tag.isNotBlank()) p += "tag" to f.tag
         // Si mostrano anche le radio non raggiungibili (finiranno in fondo all'elenco)

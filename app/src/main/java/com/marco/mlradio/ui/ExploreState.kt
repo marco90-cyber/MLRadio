@@ -218,8 +218,9 @@ class ExploreState(private val env: AppEnv) {
                 env.app.directory.remember(stations)
                 // se il server non ha fornito l'elenco delle regioni, lo ricavo dalle radio caricate
                 if (country != null && regions.isEmpty() && region.isEmpty()) {
-                    val derived = raw.filter { it.state.isNotBlank() }
-                        .groupingBy { it.state }.eachCount()
+                    val cn = country?.name.orEmpty()
+                    val derived = raw.mapNotNull { RadioApi.cleanRegion(it.state, cn) }
+                        .groupingBy { it }.eachCount()
                         .map { RegionInfo(it.key, it.value) }
                         .sortedBy { it.name.lowercase(Locale.ROOT) }
                     if (derived.size > 1) regions = derived
