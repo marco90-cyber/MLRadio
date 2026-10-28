@@ -460,7 +460,7 @@ class PlayerEngine(
 
     // ------------------------------------------------------------------ volume (volume di sistema)
 
-    fun setVolume(v: Int) {
+    fun changeVolume(v: Int) {
         player.setDeviceVolume(v.coerceIn(0, maxVolume), 0)
     }
 

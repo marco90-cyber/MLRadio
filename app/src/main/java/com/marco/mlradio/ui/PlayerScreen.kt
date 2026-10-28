@@ -221,7 +221,7 @@ fun PlayerScreen(env: AppEnv) {
             }
             Slider(
                 value = engine.volume.toFloat(),
-                onValueChange = { engine.setVolume(it.roundToInt()) },
+                onValueChange = { engine.changeVolume(it.roundToInt()) },
                 valueRange = 0f..engine.maxVolume.toFloat(),
                 steps = (engine.maxVolume - 1).coerceAtLeast(0),
                 modifier = Modifier.weight(1f)
