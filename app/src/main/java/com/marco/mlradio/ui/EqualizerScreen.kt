@@ -205,7 +205,6 @@ fun EqualizerScreen(env: AppEnv) {
             Spacer(Modifier.width(4.dp))
         }
 
-        PlayerBar(env)
         Spacer(Modifier.height(6.dp))
 
         // preamp fisso + bande scorrevoli
