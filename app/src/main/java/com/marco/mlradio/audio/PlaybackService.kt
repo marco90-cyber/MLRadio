@@ -4,7 +4,19 @@ import android.app.PendingIntent
 import android.content.Intent
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import android.os.Bundle
+import androidx.media3.session.CommandButton
 import androidx.media3.session.LibraryResult
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
+import androidx.media3.session.SessionCommands
+import androidx.compose.runtime.snapshotFlow
+import com.marco.mlradio.R
+import com.marco.mlradio.data.Country
+import com.marco.mlradio.data.StationParser
+import kotlinx.coroutines.flow.distinctUntilChanged
+import java.text.Collator
+import java.util.Locale
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaLibraryService.LibraryParams
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
@@ -40,6 +52,15 @@ class PlaybackService : MediaLibraryService() {
         session = MediaLibrarySession.Builder(this, app.engine.player, LibraryCallback(app))
             .setSessionActivity(openApp)
             .build()
+        // il tasto «Metti nei preferiti» cambia aspetto a seconda della radio in ascolto
+        app.appScope.launch {
+            snapshotFlow {
+                val st = app.engine.currentStation
+                st?.uuid to (st != null && app.favorites.items.any { it.uuid == st.uuid })
+            }.distinctUntilChanged().collect { (id, fav) ->
+                session?.setCustomLayout(if (id == null) emptyList() else listOf(favButton(fav)))
+            }
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
@@ -72,6 +93,36 @@ class PlaybackService : MediaLibraryService() {
                 )
                 .build()
 
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): MediaSession.ConnectionResult {
+            val cmds = SessionCommands.Builder()
+                .addSessionCommands(MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.commands)
+                .add(SessionCommand(CMD_FAV, Bundle.EMPTY))
+                .build()
+            val st = app.engine.currentStation
+            val layout = if (st == null) emptyList()
+            else listOf(favButton(app.favorites.items.any { it.uuid == st.uuid }))
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailableSessionCommands(cmds)
+                .setCustomLayout(layout)
+                .build()
+        }
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle,
+        ): ListenableFuture<SessionResult> {
+            if (customCommand.customAction == CMD_FAV) {
+                app.engine.currentStation?.let { app.favorites.toggle(it) }
+                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
+            return Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_NOT_SUPPORTED))
+        }
+
         override fun onGetLibraryRoot(
             session: MediaLibrarySession,
             browser: MediaSession.ControllerInfo,
@@ -87,13 +138,71 @@ class PlaybackService : MediaLibraryService() {
             pageSize: Int,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
-            val items: List<MediaItem> = when (parentId) {
-                ROOT_ID -> listOf(folder(FAV_ID, "Preferiti"), folder(CUSTOM_ID, "Le mie radio"))
-                FAV_ID -> stationItems(app.favorites.items)
-                CUSTOM_ID -> stationItems(app.custom.items)
-                else -> emptyList()
+            val future = SettableFuture.create<LibraryResult<ImmutableList<MediaItem>>>()
+            app.appScope.launch {
+                try {
+                    val all: List<MediaItem> = children(parentId)
+                    val from = (page * pageSize).coerceAtMost(all.size)
+                    val slice = if (pageSize > 0) all.drop(from).take(pageSize) else all
+                    future.set(LibraryResult.ofItemList(slice, params))
+                } catch (e: CancellationException) {
+                    future.cancel(false)
+                    throw e
+                } catch (e: Exception) {
+                    AppLog.w("Auto", "Elenco non disponibile: $parentId", e)
+                    future.set(LibraryResult.ofItemList(emptyList<MediaItem>(), params))
+                }
             }
-            return Futures.immediateFuture(LibraryResult.ofItemList(items, params))
+            return future
+        }
+
+        private var countriesCache: List<Country>? = null
+
+        private suspend fun countries(): List<Country> =
+            countriesCache ?: RadioApi.countries().filter { it.count > 0 }.also { countriesCache = it }
+
+        private fun letterOf(c: Country): String {
+            val ch = c.localName.firstOrNull()?.uppercaseChar() ?: '#'
+            val base = java.text.Normalizer.normalize(ch.toString(), java.text.Normalizer.Form.NFD).firstOrNull() ?: ch
+            return if (base.isLetter()) base.toString() else "#"
+        }
+
+        private suspend fun children(parentId: String): List<MediaItem> {
+            when {
+                parentId == ROOT_ID -> return listOf(
+                    folder(FAV_ID, "Preferiti"), folder(EXPLORE_ID, "Esplora (tutte le radio)"), folder(CUSTOM_ID, "Le mie radio")
+                )
+                parentId == FAV_ID -> return stationItems(app.favorites.items)
+                parentId == CUSTOM_ID -> return stationItems(app.custom.items)
+                parentId == EXPLORE_ID -> {
+                    return countries().map { letterOf(it) }.distinct().sortedWith(Collator.getInstance(Locale.ITALIAN))
+                        .map { folder("x|$it", it) }
+                }
+                parentId.startsWith("x|") -> {
+                    val l = parentId.substring(2)
+                    val col = Collator.getInstance(Locale.ITALIAN)
+                    return countries().filter { letterOf(it) == l }.sortedWith { a, b -> col.compare(a.localName, b.localName) }
+                        .map { folder("c|${it.code}", "${it.flag} ${it.localName} (${it.count})") }
+                }
+                parentId.startsWith("c|") -> {
+                    val code = parentId.substring(2)
+                    val country = countries().firstOrNull { it.code == code } ?: return emptyList()
+                    val out = ArrayList<MediaItem>()
+                    out.add(folder("s|$code|", "Tutte le radio (più ascoltate)"))
+                    val regions = RadioApi.states(country.name)
+                    if (regions.size > 1) regions.forEach { out.add(folder("s|$code|${it.name}", "${it.name} (${it.count})")) }
+                    return out
+                }
+                parentId.startsWith("s|") -> {
+                    val parts = parentId.split('|', limit = 3)
+                    val list = RadioApi.search(
+                        SearchFilter(countryCode = parts[1], state = parts.getOrElse(2) { "" }, order = "clickcount"),
+                        0, 200
+                    )
+                    return stationItems(StationParser.sortOnlineFirst(StationParser.dedupe(list)))
+                }
+            }
+            return emptyList()
         }
 
         private fun stationItems(list: List<Station>): List<MediaItem> {
@@ -108,8 +217,10 @@ class PlaybackService : MediaLibraryService() {
         ): ListenableFuture<LibraryResult<MediaItem>> {
             val item = when (mediaId) {
                 ROOT_ID -> folder(ROOT_ID, "MLRadio")
+                EXPLORE_ID -> folder(EXPLORE_ID, "Esplora (tutte le radio)")
                 FAV_ID -> folder(FAV_ID, "Preferiti")
                 CUSTOM_ID -> folder(CUSTOM_ID, "Le mie radio")
+                mediaId.contains('|') -> folder(mediaId, mediaId.substringAfterLast('|').ifBlank { "Radio" })
                 else -> app.directory.find(mediaId)?.let { StationItems.browseItem(it) }
             }
             return if (item != null) Futures.immediateFuture(LibraryResult.ofItem(item, null))
@@ -160,7 +271,16 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
+    private fun favButton(isFav: Boolean): CommandButton =
+        CommandButton.Builder()
+            .setDisplayName(if (isFav) "Togli dai preferiti" else "Metti nei preferiti")
+            .setIconResId(if (isFav) R.drawable.ic_fav_on else R.drawable.ic_fav_off)
+            .setSessionCommand(SessionCommand(CMD_FAV, Bundle.EMPTY))
+            .build()
+
     companion object {
+        private const val CMD_FAV = "com.marco.mlradio.TOGGLE_FAVORITE"
+        private const val EXPLORE_ID = "mlradio_explore"
         private const val ROOT_ID = "mlradio_root"
         private const val FAV_ID = "mlradio_favorites"
         private const val CUSTOM_ID = "mlradio_custom"
