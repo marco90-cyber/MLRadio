@@ -88,7 +88,7 @@ fun StationLogo(logoUrl: String?, size: Dp, modifier: Modifier = Modifier) {
                             .background(Color.White),
                         contentAlignment = Alignment.Center
                     ) {
-                        SubcomposeAsyncImageContent(Modifier.padding(size / 14))
+                        this@SubcomposeAsyncImage.SubcomposeAsyncImageContent(Modifier.padding(size / 14))
                     }
                     else -> RadioPlaceholder(size)
                 }
