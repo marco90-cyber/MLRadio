@@ -7,6 +7,10 @@ import org.json.JSONObject
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.CancellationException
 import java.net.URLEncoder
 import java.text.Collator
 import java.util.Locale
@@ -21,12 +25,15 @@ data class Country(val name: String, val code: String, val count: Int) {
     val flag: String get() = flagEmoji(code)
 }
 
-data class RegionInfo(val name: String, val count: Int)
+/** Regione pulita; [variants] sono le scritture originali di Radio Browser (per cercarne le radio). */
+data class RegionInfo(val name: String, val count: Int, val variants: List<String> = listOf(name))
 
 data class SearchFilter(
     val name: String = "",
     val countryCode: String = "",
     val state: String = "",
+    /** true = la regione deve coincidere esattamente (si usa con le scritture originali). */
+    val stateExact: Boolean = false,
     val tag: String = "",
     /** votes (più votate), clickcount (più ascoltate), name (A-Z) */
     val order: String = "votes",
@@ -111,41 +118,57 @@ object RadioApi {
     }
 
     /** Regioni/stati di un paese (il nome inglese del paese, come in elenco). Vuoto se non disponibili. */
-    suspend fun states(countryName: String): List<RegionInfo> = withContext(Dispatchers.IO) {
+    suspend fun states(countryName: String, countryCode: String): List<RegionInfo> = withContext(Dispatchers.IO) {
         val c = enc(countryName).replace("+", "%20")
         // Più percorsi: il formato accettato dal server cambia fra versioni; l'elenco completo è l'ultima risorsa.
         val paths = listOf("/json/states/$c", "/json/states/$c/", "/json/states")
-        val merged = LinkedHashMap<String, Int>()
+        var result = emptyList<RegionInfo>()
         for (path in paths) {
             val text = try {
                 get(path)
             } catch (_: Exception) {
                 continue
             }
+            val raw = ArrayList<Pair<String, Int>>()
             try {
                 val a = JSONArray(text)
                 for (i in 0 until a.length()) {
                     val o = a.optJSONObject(i) ?: continue
-                    val country = o.optString("country").trim()
-                    if (!country.equals(countryName, ignoreCase = true)) continue
-                    val cnt = o.optInt("stationcount", 0)
-                    val n = cleanRegion(o.optString("name"), countryName) ?: continue
-                    if (cnt > 0) merged[n] = (merged[n] ?: 0) + cnt
+                    if (!o.optString("country").trim().equals(countryName, ignoreCase = true)) continue
+                    raw += o.optString("name") to o.optInt("stationcount", 0)
                 }
             } catch (_: Exception) {
             }
-            if (merged.size > 1) break
+            result = Regions.merge(raw, countryCode, countryName)
+            if (result.size > 1) break
         }
-        val collator = Collator.getInstance(Locale.ITALIAN)
-        merged.map { RegionInfo(it.key, it.value) }.sortedWith { x, y -> collator.compare(x.name, y.name) }
+        result
     }
 
-    /** Pulisce i nomi sporchi di Radio Browser: "Lombardia/Italy" -> "Lombardia"; il solo nome del paese non è una regione. */
-    fun cleanRegion(raw: String, countryName: String): String? {
-        val first = raw.split('/', ',', ';').map { it.trim() }.firstOrNull { it.isNotEmpty() } ?: return null
-        if (first.equals(countryName, ignoreCase = true)) return null
-        if (first.length < 2) return null
-        return first.replaceFirstChar { it.uppercase() }
+    /** Radio di una regione: una ricerca per ogni scrittura originale, poi unione senza doppioni. */
+    suspend fun searchRegion(f: SearchFilter, region: RegionInfo, limitEach: Int = 300): List<Station> = coroutineScope {
+        val variants = region.variants.take(25)
+        val pages = variants.map { v ->
+            async {
+                try {
+                    search(f.copy(state = v, stateExact = true), 0, limitEach)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            }
+        }.awaitAll()
+        val seen = HashSet<String>()
+        val all = pages.flatten().filter { seen.add(it.uuid) }
+        when (f.order) {
+            "clickcount" -> all.sortedByDescending { it.clickCount }
+            "name" -> {
+                val col = Collator.getInstance(Locale.ITALIAN)
+                all.sortedWith { a, b -> col.compare(a.name, b.name) }
+            }
+            else -> all.sortedByDescending { it.votes }
+        }
     }
 
     private fun query(f: SearchFilter, offset: Int, limit: Int): String {
@@ -154,6 +177,7 @@ object RadioApi {
         if (f.countryCode.isNotBlank()) p += "countrycode" to f.countryCode
         if (f.state.isNotBlank()) {
             p += "state" to f.state
+            if (f.stateExact) p += "state_exact" to "true"
         }
         if (f.tag.isNotBlank()) p += "tag" to f.tag
         // Si mostrano anche le radio non raggiungibili (finiranno in fondo all'elenco)

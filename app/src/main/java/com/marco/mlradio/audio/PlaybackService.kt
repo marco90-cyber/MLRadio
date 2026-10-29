@@ -190,6 +190,14 @@ class PlaybackService : MediaLibraryService() {
         private suspend fun countries(): List<Country> =
             countriesCache ?: RadioApi.countries().filter { it.count > 0 }.also { countriesCache = it }
 
+        private val regionCache = HashMap<String, List<com.marco.mlradio.data.RegionInfo>>()
+
+        private suspend fun regionsOf(code: String): List<com.marco.mlradio.data.RegionInfo> {
+            regionCache[code]?.let { return it }
+            val country = countries().firstOrNull { it.code == code } ?: return emptyList()
+            return RadioApi.states(country.name, code).also { if (it.isNotEmpty()) regionCache[code] = it }
+        }
+
         private suspend fun children(parentId: String): List<MediaItem> {
             when {
                 parentId == ROOT_ID -> return listOf(
@@ -207,20 +215,41 @@ class PlaybackService : MediaLibraryService() {
                         .map { folder("c|${it.code}", "${it.flag} ${it.localName}") }
                 }
                 parentId.startsWith("c|") -> {
+                    // in cima: più ascoltate, più votate, genere, regione; sotto l'elenco completo A-Z
                     val code = parentId.substring(2)
-                    val country = countries().firstOrNull { it.code == code } ?: return emptyList()
-                    val out = ArrayList<MediaItem>()
-                    out.add(folder("s|$code|", "Tutte le radio del paese"))
-                    val regions = RadioApi.states(country.name)
-                    if (regions.size > 1) regions.forEach { out.add(folder("s|$code|${it.name}", "${it.name} (${it.count})")) }
+                    val out = arrayListOf(
+                        folder("o|$code|clickcount", "Più ascoltate"),
+                        folder("o|$code|votes", "Più votate"),
+                        folder("g|$code", "Genere"),
+                        folder("r|$code", "Regione"),
+                    )
+                    val all = RadioApi.search(SearchFilter(countryCode = code, order = "name"), 0, 500)
+                    out += stationItems(StationParser.sortOnlineFirst(StationParser.dedupe(all)))
                     return out
                 }
-                parentId.startsWith("s|") -> {
-                    val parts = parentId.split('|', limit = 3)
-                    val list = RadioApi.search(
-                        SearchFilter(countryCode = parts[1], state = parts.getOrElse(2) { "" }, order = "clickcount"),
-                        0, 200
-                    )
+                parentId.startsWith("o|") -> {
+                    val (_, code, order) = parentId.split('|', limit = 3)
+                    val list = RadioApi.search(SearchFilter(countryCode = code, order = order), 0, 200)
+                    return stationItems(StationParser.sortOnlineFirst(StationParser.dedupe(list)))
+                }
+                parentId.startsWith("g|") -> {
+                    val code = parentId.substring(2)
+                    return com.marco.mlradio.ui.Genres.map { (label, tag) -> folder("t|$code|$tag", label) }
+                }
+                parentId.startsWith("t|") -> {
+                    val (_, code, tag) = parentId.split('|', limit = 3)
+                    val list = RadioApi.search(SearchFilter(countryCode = code, tag = tag, order = "clickcount"), 0, 200)
+                    return stationItems(StationParser.sortOnlineFirst(StationParser.dedupe(list)))
+                }
+                parentId.startsWith("r|") -> {
+                    val code = parentId.substring(2)
+                    val regions = regionsOf(code)
+                    return regions.map { folder("rr|$code|${it.name}", "${it.name} (${it.count})") }
+                }
+                parentId.startsWith("rr|") -> {
+                    val (_, code, name) = parentId.split('|', limit = 3)
+                    val ri = regionsOf(code).firstOrNull { it.name == name } ?: return emptyList()
+                    val list = RadioApi.searchRegion(SearchFilter(countryCode = code, order = "clickcount"), ri, 200)
                     return stationItems(StationParser.sortOnlineFirst(StationParser.dedupe(list)))
                 }
             }

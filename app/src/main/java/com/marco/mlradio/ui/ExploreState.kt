@@ -66,6 +66,7 @@ class ExploreState(private val env: AppEnv) {
         private set
     var region by mutableStateOf("")
         private set
+    private var regionInfo: RegionInfo? = null
     var tag by mutableStateOf("")
         private set
     var order by mutableStateOf("votes")
@@ -120,11 +121,12 @@ class ExploreState(private val env: AppEnv) {
         customOpen = false
         regions = emptyList()
         region = ""
+        regionInfo = null
         tag = ""
         query = ""
         env.app.appScope.launch {
             val list = try {
-                RadioApi.states(c.name)
+                RadioApi.states(c.name, c.code)
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
@@ -141,6 +143,7 @@ class ExploreState(private val env: AppEnv) {
         customOpen = false
         regions = emptyList()
         region = ""
+        regionInfo = null
         tag = ""
         query = text.trim()
         reload()
@@ -165,6 +168,7 @@ class ExploreState(private val env: AppEnv) {
 
     fun selectRegion(name: String) {
         region = name
+        regionInfo = regions.firstOrNull { it.name == name }
         reload()
     }
 
@@ -181,7 +185,7 @@ class ExploreState(private val env: AppEnv) {
     private fun filter() = SearchFilter(
         name = query,
         countryCode = country?.code.orEmpty(),
-        state = region,
+        state = if (regionInfo == null) region else "",
         tag = tag,
         order = order,
     )
@@ -208,21 +212,22 @@ class ExploreState(private val env: AppEnv) {
         error = null
         job = env.app.appScope.launch {
             try {
-                val page = RadioApi.search(f, offset, PAGE)
+                val ri = regionInfo
+                val page = if (ri != null) RadioApi.searchRegion(f, ri) else RadioApi.search(f, offset, PAGE)
                 if (g != gen) return@launch
                 val known = raw.mapTo(HashSet()) { it.uuid }
                 raw.addAll(page.filter { known.add(it.uuid) })
                 offset += page.size
-                hasMore = page.size >= PAGE
+                hasMore = ri == null && page.size >= PAGE
                 stations = StationParser.sortOnlineFirst(StationParser.dedupe(raw))
                 env.app.directory.remember(stations)
                 // se il server non ha fornito l'elenco delle regioni, lo ricavo dalle radio caricate
                 if (country != null && regions.isEmpty() && region.isEmpty()) {
                     val cn = country?.name.orEmpty()
-                    val derived = raw.mapNotNull { RadioApi.cleanRegion(it.state, cn) }
-                        .groupingBy { it }.eachCount()
-                        .map { RegionInfo(it.key, it.value) }
-                        .sortedBy { it.name.lowercase(Locale.ROOT) }
+                    val derived = com.marco.mlradio.data.Regions.merge(
+                        raw.filter { it.state.isNotBlank() }.groupingBy { it.state }.eachCount().toList(),
+                        country?.code.orEmpty(), cn
+                    )
                     if (derived.size > 1) regions = derived
                 }
             } catch (e: CancellationException) {
