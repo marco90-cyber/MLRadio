@@ -53,6 +53,8 @@ fun MainScreen(env: AppEnv) {
         }
     }
 
+    // Surface: dà a tutti i testi e le icone il colore giusto per il tema chiaro/scuro
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
     Box(Modifier.fillMaxSize()) {
         Scaffold(
             contentWindowInsets = WindowInsets(0),
@@ -100,6 +102,7 @@ fun MainScreen(env: AppEnv) {
         }
         if (env.addDialog) AddStationDialog(env) { env.addDialog = false }
     }
+}
 }
 
 @Composable
