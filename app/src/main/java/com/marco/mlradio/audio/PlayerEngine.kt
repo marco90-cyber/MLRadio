@@ -451,6 +451,11 @@ class PlayerEngine(
         main.postDelayed({ if (!wantsPlay) resume() }, 1500)
     }
 
+    /** Elenco scelto da Android Auto: serve per passare alla radio precedente/successiva anche in auto. */
+    fun setQueueFromAuto(list: List<Station>) {
+        queue = list
+    }
+
     fun next() = step(+1)
 
     fun previous() = step(-1)

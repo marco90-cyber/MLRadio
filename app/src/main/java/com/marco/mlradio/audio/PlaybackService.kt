@@ -3,7 +3,9 @@ package com.marco.mlradio.audio
 import android.app.PendingIntent
 import android.content.Intent
 import androidx.media3.common.MediaItem
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
 import android.os.Bundle
 import androidx.media3.session.CommandButton
 import androidx.media3.session.LibraryResult
@@ -49,7 +51,7 @@ class PlaybackService : MediaLibraryService() {
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        session = MediaLibrarySession.Builder(this, app.engine.player, LibraryCallback(app))
+        session = MediaLibrarySession.Builder(this, RadioPlayer(app), LibraryCallback(app))
             .setSessionActivity(openApp)
             .build()
         // il tasto «Metti nei preferiti» cambia aspetto a seconda della radio in ascolto
@@ -76,6 +78,33 @@ class PlaybackService : MediaLibraryService() {
         session?.release()
         session = null
         super.onDestroy()
+    }
+
+    /**
+     * Il player visto da notifica e Android Auto: «precedente/successiva» passano alla radio
+     * precedente/successiva dell'elenco da cui si è partiti (preferiti, paese, regione...).
+     */
+    private class RadioPlayer(private val app: MLRadioApp) : ForwardingPlayer(app.engine.player) {
+        private val extra = Player.Commands.Builder()
+            .addAll(
+                Player.COMMAND_SEEK_TO_NEXT, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+                Player.COMMAND_SEEK_TO_PREVIOUS, Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+                Player.COMMAND_PLAY_PAUSE,
+            ).build()
+
+        override fun getAvailableCommands(): Player.Commands =
+            super.getAvailableCommands().buildUpon().addAll(extra).build()
+
+        override fun isCommandAvailable(command: Int): Boolean =
+            extra.contains(command) || super.isCommandAvailable(command)
+
+        override fun hasNextMediaItem(): Boolean = app.engine.queue.size > 1
+        override fun hasPreviousMediaItem(): Boolean = app.engine.queue.size > 1
+
+        override fun seekToNext() = app.engine.next()
+        override fun seekToNextMediaItem() = app.engine.next()
+        override fun seekToPrevious() = app.engine.previous()
+        override fun seekToPreviousMediaItem() = app.engine.previous()
     }
 
     private class LibraryCallback(private val app: MLRadioApp) : MediaLibrarySession.Callback {
@@ -161,34 +190,27 @@ class PlaybackService : MediaLibraryService() {
         private suspend fun countries(): List<Country> =
             countriesCache ?: RadioApi.countries().filter { it.count > 0 }.also { countriesCache = it }
 
-        private fun letterOf(c: Country): String {
-            val ch = c.localName.firstOrNull()?.uppercaseChar() ?: '#'
-            val base = java.text.Normalizer.normalize(ch.toString(), java.text.Normalizer.Form.NFD).firstOrNull() ?: ch
-            return if (base.isLetter()) base.toString() else "#"
-        }
-
         private suspend fun children(parentId: String): List<MediaItem> {
             when {
                 parentId == ROOT_ID -> return listOf(
-                    folder(FAV_ID, "Preferiti"), folder(EXPLORE_ID, "Esplora (tutte le radio)"), folder(CUSTOM_ID, "Le mie radio")
+                    folder(FAV_ID, "Preferiti"), folder(EXPLORE_ID, "Tutte le radio"), folder(CUSTOM_ID, "Le mie radio")
                 )
                 parentId == FAV_ID -> return stationItems(app.favorites.items)
                 parentId == CUSTOM_ID -> return stationItems(app.custom.items)
                 parentId == EXPLORE_ID -> {
-                    return countries().map { letterOf(it) }.distinct().sortedWith(Collator.getInstance(Locale.ITALIAN))
-                        .map { folder("x|$it", it) }
-                }
-                parentId.startsWith("x|") -> {
-                    val l = parentId.substring(2)
+                    // elenco degli stati A-Z; quello del telefono (es. Italia) in cima
                     val col = Collator.getInstance(Locale.ITALIAN)
-                    return countries().filter { letterOf(it) == l }.sortedWith { a, b -> col.compare(a.localName, b.localName) }
-                        .map { folder("c|${it.code}", "${it.flag} ${it.localName} (${it.count})") }
+                    val home = Locale.getDefault().country.uppercase(Locale.ROOT)
+                    val all = countries().sortedWith { a, b -> col.compare(a.localName, b.localName) }
+                    val first = all.filter { it.code == home }
+                    return (first + all.filter { it.code != home })
+                        .map { folder("c|${it.code}", "${it.flag} ${it.localName}") }
                 }
                 parentId.startsWith("c|") -> {
                     val code = parentId.substring(2)
                     val country = countries().firstOrNull { it.code == code } ?: return emptyList()
                     val out = ArrayList<MediaItem>()
-                    out.add(folder("s|$code|", "Tutte le radio (più ascoltate)"))
+                    out.add(folder("s|$code|", "Tutte le radio del paese"))
                     val regions = RadioApi.states(country.name)
                     if (regions.size > 1) regions.forEach { out.add(folder("s|$code|${it.name}", "${it.name} (${it.count})")) }
                     return out
@@ -205,8 +227,12 @@ class PlaybackService : MediaLibraryService() {
             return emptyList()
         }
 
+        /** Ultimo elenco mostrato in auto che contiene ogni radio: diventa la coda precedente/successiva. */
+        private val stationLists = HashMap<String, List<Station>>()
+
         private fun stationItems(list: List<Station>): List<MediaItem> {
             app.directory.remember(list)
+            for (st in list) stationLists[st.uuid] = list
             return list.map { StationItems.browseItem(it) }
         }
 
@@ -217,7 +243,7 @@ class PlaybackService : MediaLibraryService() {
         ): ListenableFuture<LibraryResult<MediaItem>> {
             val item = when (mediaId) {
                 ROOT_ID -> folder(ROOT_ID, "MLRadio")
-                EXPLORE_ID -> folder(EXPLORE_ID, "Esplora (tutte le radio)")
+                EXPLORE_ID -> folder(EXPLORE_ID, "Tutte le radio")
                 FAV_ID -> folder(FAV_ID, "Preferiti")
                 CUSTOM_ID -> folder(CUSTOM_ID, "Le mie radio")
                 else -> if (mediaId.contains('|')) folder(mediaId, mediaId.substringAfterLast('|').ifBlank { "Radio" })
@@ -244,6 +270,10 @@ class PlaybackService : MediaLibraryService() {
                         } else if (item.localConfiguration != null) {
                             out.add(item)
                         }
+                    }
+                    if (mediaItems.size == 1) {
+                        val first = out.firstOrNull()?.let { StationItems.stationFrom(it) }
+                        if (first != null) app.engine.setQueueFromAuto(stationLists[first.uuid] ?: listOf(first))
                     }
                     future.set(out)
                 } catch (e: CancellationException) {
