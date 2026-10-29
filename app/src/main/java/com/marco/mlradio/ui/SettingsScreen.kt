@@ -43,6 +43,7 @@ fun SettingsScreen(env: AppEnv) {
     val ctx = LocalContext.current
     var clearDialog by remember { mutableStateOf(false) }
     var autoDialog by remember { mutableStateOf(false) }
+    var updateOpen by remember { mutableStateOf(false) }
     val transparent = ListItemDefaults.colors(containerColor = Color.Transparent)
 
     Column(Modifier.fillMaxSize()) {
@@ -144,6 +145,12 @@ fun SettingsScreen(env: AppEnv) {
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             ListItem(
                 colors = transparent,
+                headlineContent = { Text("Cerca aggiornamenti") },
+                supportingContent = { Text("Versione installata ${com.marco.mlradio.BuildConfig.VERSION_NAME}") },
+                modifier = Modifier.clickable { updateOpen = true }
+            )
+            ListItem(
+                colors = transparent,
                 headlineContent = { Text("Informazioni") },
                 supportingContent = { Text("Versione, crediti, licenze") },
                 modifier = Modifier.clickable { env.showAbout = true }
@@ -151,6 +158,8 @@ fun SettingsScreen(env: AppEnv) {
             Text("", Modifier.padding(16.dp))
         }
     }
+
+    if (updateOpen) UpdateDialog(env) { updateOpen = false }
 
     if (clearDialog) {
         AlertDialog(

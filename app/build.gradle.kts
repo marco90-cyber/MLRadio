@@ -29,11 +29,25 @@ android {
         }
     }
 
+    // Chiave privata: arriva dai segreti di GitHub (il workflow la scrive in un file temporaneo).
+    val ksFile = System.getenv("SIGNING_KEYSTORE_FILE")?.let { file(it) }?.takeIf { it.exists() }
+    signingConfigs {
+        if (ksFile != null) {
+            create("release") {
+                storeFile = ksFile
+                storePassword = System.getenv("SIGNING_STORE_PASSWORD")
+                keyAlias = System.getenv("SIGNING_KEY_ALIAS")
+                keyPassword = System.getenv("SIGNING_KEY_PASSWORD")
+                storeType = "PKCS12"
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Firmato con la chiave di debug: l'APK è subito installabile sul telefono.
-            signingConfig = signingConfigs.getByName("debug")
+            // Con la chiave privata se presente, altrimenti con quella di debug (APK comunque installabile).
+            signingConfig = if (ksFile != null) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
         }
     }
 
