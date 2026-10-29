@@ -21,6 +21,13 @@ object StationItems {
         val meta = MediaMetadata.Builder()
             .setTitle(st.name)
             .setArtist(st.place().ifBlank { "In diretta" })
+            // sottotitolo breve, leggibile a colpo d'occhio: regione · genere
+            .setSubtitle(
+                listOfNotNull(
+                    st.state.takeIf { it.isNotBlank() } ?: st.countryLocalName().takeIf { it.isNotBlank() },
+                    st.genres(1).firstOrNull()?.replaceFirstChar { it.uppercase() },
+                ).joinToString(" · ").ifBlank { "In diretta" }
+            )
             .setIsPlayable(true)
             .setIsBrowsable(false)
             .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)

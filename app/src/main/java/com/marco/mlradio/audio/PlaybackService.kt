@@ -109,18 +109,36 @@ class PlaybackService : MediaLibraryService() {
 
     private class LibraryCallback(private val app: MLRadioApp) : MediaLibrarySession.Callback {
 
-        private fun folder(id: String, title: String): MediaItem =
-            MediaItem.Builder()
-                .setMediaId(id)
-                .setMediaMetadata(
-                    MediaMetadata.Builder()
-                        .setTitle(title)
-                        .setIsBrowsable(true)
-                        .setIsPlayable(false)
-                        .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_RADIO_STATIONS)
-                        .build()
-                )
-                .build()
+        private fun icon(res: Int): android.net.Uri =
+            android.net.Uri.parse("android.resource://${app.packageName}/$res")
+
+        /**
+         * Cartella per Android Auto. [listStyle] = true: le radio dentro sono mostrate in elenco
+         * (elenchi lunghi), altrimenti a griglia con i loghi grandi (più facili da toccare alla guida).
+         */
+        private fun folder(
+            id: String,
+            title: String,
+            iconRes: Int? = null,
+            listStyle: Boolean = false,
+            subtitle: String? = null,
+            group: String? = null,
+        ): MediaItem {
+            val extras = Bundle().apply {
+                putInt(KEY_PLAYABLE_STYLE, if (listStyle) STYLE_LIST else STYLE_GRID)
+                putInt(KEY_BROWSABLE_STYLE, STYLE_LIST)
+                if (group != null) putString(KEY_GROUP, group)
+            }
+            val meta = MediaMetadata.Builder()
+                .setTitle(title)
+                .setIsBrowsable(true)
+                .setIsPlayable(false)
+                .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_RADIO_STATIONS)
+                .setExtras(extras)
+            if (subtitle != null) meta.setSubtitle(subtitle)
+            if (iconRes != null) meta.setArtworkUri(icon(iconRes))
+            return MediaItem.Builder().setMediaId(id).setMediaMetadata(meta.build()).build()
+        }
 
         override fun onConnect(
             session: MediaSession,
@@ -157,7 +175,18 @@ class PlaybackService : MediaLibraryService() {
             browser: MediaSession.ControllerInfo,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<MediaItem>> =
-            Futures.immediateFuture(LibraryResult.ofItem(folder(ROOT_ID, "MLRadio"), params))
+            Futures.immediateFuture(
+                LibraryResult.ofItem(
+                    folder(ROOT_ID, "MLRadio"),
+                    LibraryParams.Builder()
+                        .setExtras(Bundle().apply {
+                            putBoolean(KEY_STYLE_SUPPORTED, true)
+                            putInt(KEY_BROWSABLE_STYLE, STYLE_LIST)
+                            putInt(KEY_PLAYABLE_STYLE, STYLE_GRID)
+                        })
+                        .build()
+                )
+            )
 
         override fun onGetChildren(
             session: MediaLibrarySession,
@@ -200,11 +229,14 @@ class PlaybackService : MediaLibraryService() {
 
         private suspend fun children(parentId: String): List<MediaItem> {
             when {
+                // le voci della radice diventano le schede in alto di Android Auto
                 parentId == ROOT_ID -> return listOf(
-                    folder(FAV_ID, "Preferiti"), folder(EXPLORE_ID, "Tutte le radio"), folder(CUSTOM_ID, "Le mie radio")
+                    folder(FAV_ID, "Preferiti", R.drawable.ic_fav_on),
+                    folder(EXPLORE_ID, "Tutte le radio", R.drawable.ic_auto_globe, listStyle = true),
+                    folder(CUSTOM_ID, "Le mie radio", R.drawable.ic_auto_radio),
                 )
-                parentId == FAV_ID -> return stationItems(app.favorites.items)
-                parentId == CUSTOM_ID -> return stationItems(app.custom.items)
+                parentId == FAV_ID -> return stationItems(app.favorites.items, hideOffline = false)
+                parentId == CUSTOM_ID -> return stationItems(app.custom.items, hideOffline = false)
                 parentId == EXPLORE_ID -> {
                     // elenco degli stati A-Z; quello del telefono (es. Italia) in cima
                     val col = Collator.getInstance(Locale.ITALIAN)
@@ -212,19 +244,20 @@ class PlaybackService : MediaLibraryService() {
                     val all = countries().sortedWith { a, b -> col.compare(a.localName, b.localName) }
                     val first = all.filter { it.code == home }
                     return (first + all.filter { it.code != home })
-                        .map { folder("c|${it.code}", "${it.flag} ${it.localName}") }
+                        .map { folder("c|${it.code}", "${it.flag}  ${it.localName}", listStyle = true, subtitle = "${it.count} radio") }
                 }
                 parentId.startsWith("c|") -> {
                     // in cima: più ascoltate, più votate, genere, regione; sotto l'elenco completo A-Z
                     val code = parentId.substring(2)
+                    val pick = "Scegli"
                     val out = arrayListOf(
-                        folder("o|$code|clickcount", "Più ascoltate"),
-                        folder("o|$code|votes", "Più votate"),
-                        folder("g|$code", "Genere"),
-                        folder("r|$code", "Regione"),
+                        folder("o|$code|clickcount", "Più ascoltate", R.drawable.ic_auto_trending, group = pick),
+                        folder("o|$code|votes", "Più votate", R.drawable.ic_auto_star, group = pick),
+                        folder("g|$code", "Genere", R.drawable.ic_auto_genre, group = pick),
+                        folder("r|$code", "Regione", R.drawable.ic_auto_place, listStyle = true, group = pick),
                     )
                     val all = RadioApi.search(SearchFilter(countryCode = code, order = "name"), 0, 500)
-                    out += stationItems(StationParser.sortOnlineFirst(StationParser.dedupe(all)))
+                    out += stationItems(StationParser.dedupe(all), group = "Tutte le radio (A-Z)")
                     return out
                 }
                 parentId.startsWith("o|") -> {
@@ -234,7 +267,7 @@ class PlaybackService : MediaLibraryService() {
                 }
                 parentId.startsWith("g|") -> {
                     val code = parentId.substring(2)
-                    return com.marco.mlradio.ui.Genres.map { (label, tag) -> folder("t|$code|$tag", label) }
+                    return com.marco.mlradio.ui.Genres.map { (label, tag) -> folder("t|$code|$tag", label, R.drawable.ic_auto_genre) }
                 }
                 parentId.startsWith("t|") -> {
                     val (_, code, tag) = parentId.split('|', limit = 3)
@@ -244,7 +277,7 @@ class PlaybackService : MediaLibraryService() {
                 parentId.startsWith("r|") -> {
                     val code = parentId.substring(2)
                     val regions = regionsOf(code)
-                    return regions.map { folder("rr|$code|${it.name}", "${it.name} (${it.count})") }
+                    return regions.map { folder("rr|$code|${it.name}", it.name, R.drawable.ic_auto_place, subtitle = "${it.count} radio") }
                 }
                 parentId.startsWith("rr|") -> {
                     val (_, code, name) = parentId.split('|', limit = 3)
@@ -259,10 +292,22 @@ class PlaybackService : MediaLibraryService() {
         /** Ultimo elenco mostrato in auto che contiene ogni radio: diventa la coda precedente/successiva. */
         private val stationLists = HashMap<String, List<Station>>()
 
-        private fun stationItems(list: List<Station>): List<MediaItem> {
+        /**
+         * Radio per Android Auto. Alla guida le radio non raggiungibili si nascondono (tranne preferiti
+         * e radio personali), così ogni tocco fa partire qualcosa.
+         */
+        private fun stationItems(all: List<Station>, hideOffline: Boolean = true, group: String? = null): List<MediaItem> {
+            val list = if (hideOffline) all.filter { it.online } else all
             app.directory.remember(list)
             for (st in list) stationLists[st.uuid] = list
-            return list.map { StationItems.browseItem(it) }
+            return list.map { st ->
+                val item = StationItems.browseItem(st)
+                if (group == null) item
+                else {
+                    val ex = Bundle(item.mediaMetadata.extras ?: Bundle()).apply { putString(KEY_GROUP, group) }
+                    item.buildUpon().setMediaMetadata(item.mediaMetadata.buildUpon().setExtras(ex).build()).build()
+                }
+            }
         }
 
         override fun onGetItem(
@@ -337,6 +382,13 @@ class PlaybackService : MediaLibraryService() {
                 .setIconResId(if (isFav) R.drawable.ic_fav_on else R.drawable.ic_fav_off)
                 .setSessionCommand(SessionCommand(CMD_FAV, Bundle.EMPTY))
                 .build()
+        // suggerimenti di impaginazione per Android Auto (androidx.media.utils.MediaConstants)
+        private const val KEY_STYLE_SUPPORTED = "android.media.browse.CONTENT_STYLE_SUPPORTED"
+        private const val KEY_BROWSABLE_STYLE = "android.media.browse.CONTENT_STYLE_BROWSABLE_HINT"
+        private const val KEY_PLAYABLE_STYLE = "android.media.browse.CONTENT_STYLE_PLAYABLE_HINT"
+        private const val KEY_GROUP = "android.media.browse.CONTENT_STYLE_GROUP_TITLE_HINT"
+        private const val STYLE_LIST = 1
+        private const val STYLE_GRID = 2
         private const val CMD_FAV = "com.marco.mlradio.TOGGLE_FAVORITE"
         private const val EXPLORE_ID = "mlradio_explore"
         private const val ROOT_ID = "mlradio_root"
