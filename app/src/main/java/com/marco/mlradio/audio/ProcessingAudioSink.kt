@@ -35,6 +35,7 @@ class ProcessingAudioSink(
         if (raw) {
             processor.targetRate = 0
             processor.outputBits = 32
+            processor.replayGain = ReplayGain.parse(inputFormat.metadata)
             try {
                 val out = processor.configure(AudioProcessor.AudioFormat(inputFormat))
                 if (processor.isActive) {
