@@ -21,6 +21,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             MLRadioTheme(env.settings) {
                 MainScreen(env)
+                AppUpdateHost()
             }
         }
     }
