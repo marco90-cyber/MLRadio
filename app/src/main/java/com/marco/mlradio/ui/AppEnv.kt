@@ -30,6 +30,9 @@ class AppEnv(val app: MLRadioApp) {
 
     val explore = ExploreState(this)
 
+    /** Curva calcolata dal motore nativo per l'equalizzatore. */
+    val preview by lazy { com.marco.mlradio.audio.DspPreview() }
+
     fun play(st: Station, queue: List<Station>) {
         app.directory.remember(queue)
         engine.play(st, queue)

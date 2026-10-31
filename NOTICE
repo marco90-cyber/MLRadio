@@ -16,3 +16,7 @@ Licenza: GNU LGPL v2.1 o successiva (testo in app/src/main/cpp/soxr/LICENCE e CO
 Usata per il ricampionamento; sorgenti in app/src/main/cpp/soxr/.
 
 AndroidX Media3, Jetpack Compose, Material 3, Coil, Guava - Apache License 2.0.
+
+
+Equalizzatore (da MLEqualizer): idee ispirate a Poweramp, JadOO DSP, Mornye e AutoEQ; nessun codice copiato.
+Filtri: RBJ Audio EQ Cookbook e M. Vicanek, "Matched Second Order Digital Filters". Loudness: ITU-R BS.1770 / EBU R128.

@@ -144,8 +144,18 @@ class PlayerEngine(
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
 
-        eqProcessor.setConfig(settings.eq)
-        settings.onEqChanged = { cfg -> eqProcessor.setConfig(cfg) }
+        eqProcessor.setSettings(settings.dsp)
+        settings.onDspChanged = { cfg ->
+            eqProcessor.setSettings(cfg)
+        }
+        // la loudness segue il volume del telefono
+        updateListenVolume()
+        app.contentResolver.registerContentObserver(
+            android.provider.Settings.System.CONTENT_URI, true,
+            object : android.database.ContentObserver(android.os.Handler(android.os.Looper.getMainLooper())) {
+                override fun onChange(selfChange: Boolean) = updateListenVolume()
+            }
+        )
 
         syncVolume()
         val volFilter = android.content.IntentFilter().apply {
@@ -513,4 +523,23 @@ class PlayerEngine(
         private const val STALE_MS = 20_000L
         private const val MAX_RETRIES = 2
     }
+
+    /** Volume multimediale del telefono come fattore lineare (0 dB = 1), per la loudness. */
+    private fun updateListenVolume() {
+        try {
+            val am = app.getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+            val idx = am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+            val max = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+            val db = if (android.os.Build.VERSION.SDK_INT >= 28) {
+                am.getStreamVolumeDb(android.media.AudioManager.STREAM_MUSIC, idx, android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+            } else {
+                // stima: la scala di Android copre circa 60 dB
+                if (idx == 0) -60f else -60f * (1f - idx.toFloat() / max)
+            }
+            eqProcessor.listenVolume = if (db.isFinite()) Math.pow(10.0, db.coerceIn(-80f, 0f) / 20.0) else 1.0
+        } catch (_: Throwable) {
+            eqProcessor.listenVolume = 1.0
+        }
+    }
+
 }
