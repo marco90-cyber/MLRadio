@@ -63,6 +63,17 @@ class PlaybackService : MediaLibraryService() {
                 session?.setCustomLayout(if (id == null) emptyList() else listOf(favButton(fav)))
             }
         }
+        // la scheda Preferiti di Android Auto si aggiorna subito quando i preferiti cambiano
+        app.appScope.launch {
+            snapshotFlow { app.favorites.items.map { it.uuid } }.distinctUntilChanged().collect { ids ->
+                session?.notifyChildrenChanged(FAV_ID, ids.size, null)
+            }
+        }
+        app.appScope.launch {
+            snapshotFlow { app.custom.items.map { it.uuid } }.distinctUntilChanged().collect { ids ->
+                session?.notifyChildrenChanged(CUSTOM_ID, ids.size, null)
+            }
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
@@ -147,6 +158,8 @@ class PlaybackService : MediaLibraryService() {
             val cmds = SessionCommands.Builder()
                 .addSessionCommands(MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.commands)
                 .add(SessionCommand(CMD_FAV, Bundle.EMPTY))
+                .add(SessionCommand(CMD_FAV_ADD, Bundle.EMPTY))
+                .add(SessionCommand(CMD_FAV_REMOVE, Bundle.EMPTY))
                 .build()
             val st = app.engine.currentStation
             val layout = if (st == null) emptyList()
@@ -163,8 +176,20 @@ class PlaybackService : MediaLibraryService() {
             customCommand: SessionCommand,
             args: Bundle,
         ): ListenableFuture<SessionResult> {
-            if (customCommand.customAction == CMD_FAV) {
-                app.engine.currentStation?.let { app.favorites.toggle(it) }
+            val st = app.engine.currentStation
+            val action = customCommand.customAction
+            if (action == CMD_FAV || action == CMD_FAV_ADD || action == CMD_FAV_REMOVE) {
+                if (st != null) {
+                    // azioni distinte «aggiungi» e «togli»: premere due volte lo stesso tasto (o un tasto
+                    // non ancora aggiornato dall'auto) non annulla l'operazione
+                    when (action) {
+                        CMD_FAV_ADD -> app.favorites.add(st)
+                        CMD_FAV_REMOVE -> app.favorites.remove(st.uuid)
+                        else -> app.favorites.toggle(st)
+                    }
+                    session.setCustomLayout(listOf(favButton(app.favorites.contains(st.uuid))))
+                    AppLog.i("Auto", "Preferiti: ${st.name} -> ${app.favorites.contains(st.uuid)}")
+                }
                 return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
             }
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_NOT_SUPPORTED))
@@ -380,7 +405,8 @@ class PlaybackService : MediaLibraryService() {
             CommandButton.Builder()
                 .setDisplayName(if (isFav) "Togli dai preferiti" else "Metti nei preferiti")
                 .setIconResId(if (isFav) R.drawable.ic_fav_on else R.drawable.ic_fav_off)
-                .setSessionCommand(SessionCommand(CMD_FAV, Bundle.EMPTY))
+                .setSessionCommand(SessionCommand(if (isFav) CMD_FAV_REMOVE else CMD_FAV_ADD, Bundle.EMPTY))
+                .setEnabled(true)
                 .build()
         // suggerimenti di impaginazione per Android Auto (androidx.media.utils.MediaConstants)
         private const val KEY_STYLE_SUPPORTED = "android.media.browse.CONTENT_STYLE_SUPPORTED"
@@ -390,6 +416,8 @@ class PlaybackService : MediaLibraryService() {
         private const val STYLE_LIST = 1
         private const val STYLE_GRID = 2
         private const val CMD_FAV = "com.marco.mlradio.TOGGLE_FAVORITE"
+        private const val CMD_FAV_ADD = "com.marco.mlradio.FAVORITE_ADD"
+        private const val CMD_FAV_REMOVE = "com.marco.mlradio.FAVORITE_REMOVE"
         private const val EXPLORE_ID = "mlradio_explore"
         private const val ROOT_ID = "mlradio_root"
         private const val FAV_ID = "mlradio_favorites"
