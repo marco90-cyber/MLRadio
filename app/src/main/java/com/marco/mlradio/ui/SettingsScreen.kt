@@ -36,6 +36,18 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.marco.mlradio.util.AppLog
+import com.marco.mltheme.AccentPreview
+import com.marco.mltheme.MLChoiceRow
+import com.marco.mltheme.MLGroup
+import com.marco.mltheme.MLNavRow
+import com.marco.mltheme.MLSettingsScaffold
+import com.marco.mltheme.MLSwitchRow
+import com.marco.mltheme.MLThemeSettings
+import com.marco.mltheme.SWITCH_STYLES
+import com.marco.mltheme.SwitchStylePreview
+import com.marco.mltheme.THEME_MODES
+import com.marco.mltheme.ThemePreview
+import com.marco.mltheme.availableAccents
 
 @Composable
 fun SettingsScreen(env: AppEnv) {
@@ -43,118 +55,65 @@ fun SettingsScreen(env: AppEnv) {
     val ctx = LocalContext.current
     var clearDialog by remember { mutableStateOf(false) }
     var autoDialog by remember { mutableStateOf(false) }
-    val transparent = ListItemDefaults.colors(containerColor = Color.Transparent)
+    val ml = MLThemeSettings.get(ctx)
 
-    Column(Modifier.fillMaxSize()) {
-        TopAppBar(title = { Text("Impostazioni") })
-        Column(Modifier.verticalScroll(rememberScrollState())) {
-            SectionTitle("Aspetto")
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                listOf("Sistema", "Chiaro", "Scuro").forEachIndexed { i, label ->
-                    FilterChip(selected = s.themeMode == i, onClick = { s.themeMode = i }, label = { Text(label) })
+    MLSettingsScaffold("Impostazioni", onBack = null) {
+        MLGroup("Aspetto") {
+            MLChoiceRow(
+                "Tema",
+                THEME_MODES,
+                when (s.themeMode) { 1 -> "light"; 2 -> "dark"; else -> "auto" },
+                preview = { ThemePreview(it) },
+            ) { s.themeMode = when (it) { "light" -> 1; "dark" -> 2; else -> 0 } }
+            MLChoiceRow("Colori", availableAccents, ml.accent, preview = { AccentPreview(it) }) { ml.accent = it }
+            MLChoiceRow("Stile degli interruttori", SWITCH_STYLES, ml.switchStyle, preview = { SwitchStylePreview(it) }) {
+                ml.switchStyle = it
+            }
+        }
+        MLGroup("Audio") {
+            MLNavRow("Equalizzatore", "Bande, preamplificatore, bassi e acuti, limitatore, preimpostazioni") { env.showEq = true }
+            MLSwitchRow(
+                "Riprendi al collegamento",
+                "Se la radio si ferma scollegando le cuffie o il Bluetooth, riparte quando li ricolleghi",
+                s.resumeOnConnect,
+            ) { s.resumeOnConnect = it }
+            MLSwitchRow("Vibrazione dei tocchi", null, s.hapticScreen) { s.hapticScreen = it }
+        }
+        MLGroup("Android Auto") {
+            MLNavRow("Come usare MLRadio in auto", "Istruzioni per abilitare le app non da Play Store") { autoDialog = true }
+        }
+        MLGroup("Dati e permessi") {
+            MLNavRow("Permessi dell'app", "Notifiche e Bluetooth servono ai comandi nella tendina e alla ripresa automatica") {
+                ctx.startActivity(
+                    Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + ctx.packageName))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }
+            MLNavRow("Cancella la cronologia", "${env.history.items.size} brani salvati", trailing = null) { clearDialog = true }
+            MLSwitchRow("Registro diagnostico dettagliato", "Utile se qualcosa non funziona", s.verboseLog) {
+                s.verboseLog = it; AppLog.verbose = it
+            }
+            MLNavRow("Condividi il registro", null, trailing = null) {
+                try {
+                    val f = AppLog.exportFile(ctx)
+                    val uri = FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)
+                    ctx.startActivity(
+                        Intent.createChooser(
+                            Intent(Intent.ACTION_SEND).setType("text/plain")
+                                .putExtra(Intent.EXTRA_STREAM, uri)
+                                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+                            "Condividi il registro"
+                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                } catch (_: Exception) {
                 }
             }
-            ListItem(
-                colors = transparent,
-                headlineContent = { Text("Colori dinamici (Material You)") },
-                supportingContent = { Text("Usa i colori dello sfondo del telefono") },
-                trailingContent = { Switch(checked = s.dynamicColor, onCheckedChange = { s.dynamicColor = it }) },
-                modifier = Modifier.clickable { s.dynamicColor = !s.dynamicColor }
-            )
-
-            SectionTitle("Audio")
-            ListItem(
-                colors = transparent,
-                headlineContent = { Text("Equalizzatore") },
-                supportingContent = { Text("Bande, preamplificatore, bassi e acuti, limitatore, preimpostazioni") },
-                modifier = Modifier.clickable { env.showEq = true }
-            )
-            ListItem(
-                colors = transparent,
-                headlineContent = { Text("Riprendi al collegamento") },
-                supportingContent = { Text("Se la radio si ferma scollegando le cuffie o il Bluetooth, riparte quando li ricolleghi") },
-                trailingContent = { Switch(checked = s.resumeOnConnect, onCheckedChange = { s.resumeOnConnect = it }) },
-                modifier = Modifier.clickable { s.resumeOnConnect = !s.resumeOnConnect }
-            )
-            ListItem(
-                colors = transparent,
-                headlineContent = { Text("Vibrazione dei tocchi") },
-                trailingContent = { Switch(checked = s.hapticScreen, onCheckedChange = { s.hapticScreen = it }) },
-                modifier = Modifier.clickable { s.hapticScreen = !s.hapticScreen }
-            )
-
-            SectionTitle("Android Auto")
-            ListItem(
-                colors = transparent,
-                headlineContent = { Text("Come usare MLRadio in auto") },
-                supportingContent = { Text("Istruzioni per abilitare le app non da Play Store") },
-                modifier = Modifier.clickable { autoDialog = true }
-            )
-
-            SectionTitle("Dati e permessi")
-            ListItem(
-                colors = transparent,
-                headlineContent = { Text("Permessi dell'app") },
-                supportingContent = { Text("Notifiche e Bluetooth servono ai comandi nella tendina e alla ripresa automatica") },
-                modifier = Modifier.clickable {
-                    ctx.startActivity(
-                        Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + ctx.packageName))
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    )
-                }
-            )
-            ListItem(
-                colors = transparent,
-                headlineContent = { Text("Cancella la cronologia") },
-                supportingContent = { Text("${env.history.items.size} brani salvati") },
-                modifier = Modifier.clickable { clearDialog = true }
-            )
-            ListItem(
-                colors = transparent,
-                headlineContent = { Text("Registro diagnostico dettagliato") },
-                supportingContent = { Text("Utile se qualcosa non funziona") },
-                trailingContent = {
-                    Switch(checked = s.verboseLog, onCheckedChange = { s.verboseLog = it; AppLog.verbose = it })
-                },
-                modifier = Modifier.clickable { s.verboseLog = !s.verboseLog; AppLog.verbose = s.verboseLog }
-            )
-            ListItem(
-                colors = transparent,
-                headlineContent = { Text("Condividi il registro") },
-                modifier = Modifier.clickable {
-                    try {
-                        val f = AppLog.exportFile(ctx)
-                        val uri = FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)
-                        ctx.startActivity(
-                            Intent.createChooser(
-                                Intent(Intent.ACTION_SEND).setType("text/plain")
-                                    .putExtra(Intent.EXTRA_STREAM, uri)
-                                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
-                                "Condividi il registro"
-                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        )
-                    } catch (_: Exception) {
-                    }
-                }
-            )
-
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
-            ListItem(
-                colors = transparent,
-                headlineContent = { Text("Cerca aggiornamenti") },
-                supportingContent = { Text("Versione installata ${com.marco.mlradio.BuildConfig.VERSION_NAME}") },
-                modifier = Modifier.clickable { com.marco.mlradio.AppUpdate.open(ctx) }
-            )
-            ListItem(
-                colors = transparent,
-                headlineContent = { Text("Informazioni") },
-                supportingContent = { Text("Versione, crediti, licenze") },
-                modifier = Modifier.clickable { env.showAbout = true }
-            )
-            Text("", Modifier.padding(16.dp))
+        }
+        MLGroup("Informazioni") {
+            MLNavRow("Cerca aggiornamenti", "Versione installata ${com.marco.mlradio.BuildConfig.VERSION_NAME}") {
+                com.marco.mlradio.AppUpdate.open(ctx)
+            }
+            MLNavRow("Informazioni", "Versione, crediti, licenze") { env.showAbout = true }
         }
     }
 

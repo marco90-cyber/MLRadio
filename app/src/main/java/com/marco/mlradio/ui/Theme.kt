@@ -41,12 +41,9 @@ fun MLRadioTheme(settings: Settings, content: @Composable () -> Unit) {
         2 -> true
         else -> systemDark
     }
-    val ctx = LocalContext.current
-    val scheme = when {
-        settings.dynamicColor -> if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
-        dark -> FallbackDark
-        else -> FallbackLight
-    }
+    // colori e interruttori di MLTheme, come in MLauncher
+    val ml = com.marco.mltheme.MLThemeSettings.get(LocalContext.current)
+    val scheme = com.marco.mltheme.mlColorScheme(if (dark) "dark" else "light", ml.accent)
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
@@ -58,7 +55,7 @@ fun MLRadioTheme(settings: Settings, content: @Composable () -> Unit) {
             }
         }
     }
-    CompositionLocalProvider(LocalDarkTheme provides dark) {
+    CompositionLocalProvider(LocalDarkTheme provides dark, com.marco.mltheme.LocalSwitchStyle provides ml.switchStyle) {
         MaterialTheme(colorScheme = scheme, content = content)
     }
 }
