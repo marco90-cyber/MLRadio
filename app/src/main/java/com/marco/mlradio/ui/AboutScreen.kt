@@ -95,6 +95,7 @@ fun AboutScreen(env: AppEnv) {
             LicenseRow("Guava", "Apache License 2.0")
             LicenseRow("Filtri dell'equalizzatore", "Audio EQ Cookbook di Robert Bristow-Johnson")
             LicenseRow("Ispirazione dell'interfaccia", "Tryptify (GPL-3.0)")
+            LicenseRow("Clarity, anti-DC e saturazione morbida", "Idee di LastWave (GPL-3.0), riscritte")
 
             SectionTitle("Privacy")
             Text(
