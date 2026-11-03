@@ -120,7 +120,7 @@ fun StationLogo(logoUrl: String?, size: Dp, modifier: Modifier = Modifier, onErr
                 contentDescription = null,
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.size(size),
-                onError = { onError() },
+                onError = { _ -> onError() },
             ) {
                 when (painter.state) {
                     is AsyncImagePainter.State.Success -> Box(
