@@ -136,7 +136,9 @@ private fun HistoryItem(env: AppEnv, e: HistoryEntry) {
         ListItem(
             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
             modifier = Modifier.clickable { menu = true },
-            leadingContent = { StationLogo(e.favicon, 48.dp) },
+            leadingContent = {
+                StationLogo(com.marco.mlradio.data.Station(uuid = e.stationUuid.ifBlank { "h-" + e.stationName }, name = e.stationName.ifBlank { e.title }, url = "", favicon = e.favicon), 48.dp)
+            },
             headlineContent = { Text(e.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
             supportingContent = {
                 Text(

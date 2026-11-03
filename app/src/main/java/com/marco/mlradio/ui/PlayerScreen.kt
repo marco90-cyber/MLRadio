@@ -7,6 +7,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -116,7 +117,10 @@ fun PlayerScreen(env: AppEnv) {
         }
 
         Spacer(Modifier.height(8.dp))
-        StationLogo(st, 220.dp)
+        StationLogo(
+            st, 220.dp,
+            Modifier.combinedClickable(onClick = {}, onLongClick = { if (st != null) env.logoFor = st }, onLongClickLabel = "Cambia logo")
+        )
         Spacer(Modifier.height(20.dp))
 
         Text(

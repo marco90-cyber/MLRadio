@@ -43,6 +43,7 @@ class MLRadioApp : Application() {
         AppLog.init(this)
         settings = Settings(this)
         AppLog.verbose = settings.verboseLog
+        com.marco.mlradio.data.Logos.init(this, appScope)
         favorites = StationStore(this, "favorites")
         custom = StationStore(this, "custom")
         history = HistoryStore(this, appScope)

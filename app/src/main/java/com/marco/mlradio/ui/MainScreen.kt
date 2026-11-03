@@ -101,6 +101,7 @@ fun MainScreen(env: AppEnv) {
             Box(Modifier.fillMaxSize().blockTouches()) { EqualizerScreen(env) }
         }
         if (env.addDialog) AddStationDialog(env) { env.addDialog = false }
+        env.logoFor?.let { st -> LogoDialog(env, st) { env.logoFor = null } }
     }
 }
 }

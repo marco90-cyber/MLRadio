@@ -28,6 +28,9 @@ class AppEnv(val app: MLRadioApp) {
     var showAbout by mutableStateOf(false)
     var addDialog by mutableStateOf(false)
 
+    /** Radio di cui si sta cambiando il logo (finestra «Cambia logo»). */
+    var logoFor by mutableStateOf<Station?>(null)
+
     val explore = ExploreState(this)
 
     /** Curva calcolata dal motore nativo per l'equalizzatore. */

@@ -5,6 +5,7 @@ package com.marco.mlradio.ui
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,7 +48,10 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImagePainter
 import coil.compose.SubcomposeAsyncImage
 import coil.compose.SubcomposeAsyncImageContent
+import com.marco.mlradio.data.Logos
 import com.marco.mlradio.data.Station
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.unit.sp
 import com.marco.mlradio.data.flagEmoji
 
 /** Logo standard: cerchio con il simbolo della radio. Si usa quando la radio non ha logo o non si carica. */
@@ -68,17 +72,55 @@ fun RadioPlaceholder(size: Dp, modifier: Modifier = Modifier) {
     }
 }
 
-/** Logo della radio (da Radio Browser). Senza logo: cerchio con il simbolo della radio. */
+/** Iniziali o numero della radio per il segnaposto: «Radio 105 - Zoo» → 105, «Radio Kiss Kiss» → KK. */
+fun stationInitials(name: String): String {
+    val stop = setOf("radio", "fm", "am", "web", "the", "la", "il", "lo", "di", "del", "della", "de", "der", "die", "das", "le", "el", "station", "online", "tv")
+    val words = name.split(Regex("[^\\p{L}\\p{N}%]+")).filter { it.isNotBlank() }
+    val useful = words.filter { it.lowercase() !in stop }.ifEmpty { words }
+    val first = useful.firstOrNull() ?: return "R"
+    // numeri e sigle brevi si mostrano interi (105, R101, M2O, RDS, RTL)
+    if (first.any { it.isDigit() } || (first.length <= 4 && first.all { !it.isLetter() || it.isUpperCase() })) {
+        return first.take(4).uppercase()
+    }
+    val second = useful.getOrNull(1)
+    return (first.take(1) + (second?.take(1) ?: "")).uppercase()
+}
+
+/** Colore stabile ricavato dal nome. */
+private fun nameColor(name: String, dark: Boolean): Color {
+    val hue = ((name.lowercase().hashCode().toLong() and 0xffffffffL) % 360).toFloat()
+    return Color.hsl(hue, if (dark) 0.45f else 0.55f, if (dark) 0.38f else 0.45f)
+}
+
+/** Segnaposto quando non c'è un logo: iniziali o numero della radio su un colore ricavato dal nome. */
 @Composable
-fun StationLogo(logoUrl: String?, size: Dp, modifier: Modifier = Modifier) {
+fun InitialsPlaceholder(name: String, size: Dp, modifier: Modifier = Modifier) {
+    val text = stationInitials(name)
+    val dark = LocalDarkTheme.current
+    Box(
+        modifier
+            .size(size)
+            .clip(RoundedCornerShape(size / 5))
+            .background(nameColor(name, dark)),
+        contentAlignment = Alignment.Center
+    ) {
+        val fs = (size.value * when (text.length) { 1, 2 -> 0.40f; 3 -> 0.32f; else -> 0.26f }).sp
+        Text(text, color = Color.White, fontWeight = FontWeight.Bold, fontSize = fs, maxLines = 1, softWrap = false)
+    }
+}
+
+/** Logo da un indirizzo (http o file). Senza logo o se non si carica: [fallback]. */
+@Composable
+fun StationLogo(logoUrl: String?, size: Dp, modifier: Modifier = Modifier, onError: () -> Unit = {}, fallback: @Composable () -> Unit = { RadioPlaceholder(size) }) {
     val url = logoUrl.orEmpty()
     Box(modifier.size(size), contentAlignment = Alignment.Center) {
-        if (url.startsWith("http")) {
+        if (url.startsWith("http") || url.startsWith("file:")) {
             SubcomposeAsyncImage(
                 model = url,
                 contentDescription = null,
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.size(size),
+                onError = { onError() },
             ) {
                 when (painter.state) {
                     is AsyncImagePainter.State.Success -> Box(
@@ -90,18 +132,30 @@ fun StationLogo(logoUrl: String?, size: Dp, modifier: Modifier = Modifier) {
                     ) {
                         this@SubcomposeAsyncImage.SubcomposeAsyncImageContent(Modifier.padding(size / 14))
                     }
-                    else -> RadioPlaceholder(size)
+                    else -> fallback()
                 }
             }
         } else {
-            RadioPlaceholder(size)
+            fallback()
         }
     }
 }
 
+/** Logo della radio: scelto da te, di Radio Browser o trovato sul sito; altrimenti le iniziali. */
 @Composable
-fun StationLogo(station: Station?, size: Dp, modifier: Modifier = Modifier) =
-    StationLogo(station?.favicon, size, modifier)
+fun StationLogo(station: Station?, size: Dp, modifier: Modifier = Modifier) {
+    if (station == null) {
+        RadioPlaceholder(size, modifier); return
+    }
+    Logos.brokenRev // ridisegna quando un logo risulta rotto
+    val url = Logos.urlFor(station)
+    LaunchedEffect(station.uuid, url) { if (url == null) Logos.ensure(station) }
+    StationLogo(
+        url, size, modifier,
+        onError = { if (url == station.favicon) Logos.markBroken(station) },
+        fallback = { InitialsPlaceholder(station.name, size) },
+    )
+}
 
 /** Riga di una radio: logo, nome, luogo/formato, cuore dei preferiti. Tocco = ascolta. */
 @Composable
@@ -118,7 +172,11 @@ fun StationItem(
     ListItem(
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         modifier = modifier
-            .clickable { env.play(st, queue) }
+            .combinedClickable(
+                onClick = { env.play(st, queue) },
+                onLongClick = { env.feedback.tapScreen(); env.logoFor = st },
+                onLongClickLabel = "Cambia logo",
+            )
             .alpha(dim),
         leadingContent = { StationLogo(st, 52.dp) },
         headlineContent = {

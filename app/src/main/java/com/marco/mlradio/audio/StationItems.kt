@@ -13,8 +13,12 @@ object StationItems {
 
     private fun extras(st: Station) = Bundle().apply { putString(EXTRA_STATION, st.toJson().toString()) }
 
-    private fun artwork(st: Station): Uri? =
-        if (st.favicon.startsWith("http")) Uri.parse(st.favicon) else null
+    private fun artwork(st: Station): Uri? {
+        val u = com.marco.mlradio.data.Logos.custom[st.uuid]?.takeIf { it.startsWith("http") }
+            ?: st.favicon.takeIf { it.startsWith("http") }
+            ?: com.marco.mlradio.data.Logos.found[st.uuid]?.takeIf { it.startsWith("http") }
+        return u?.let { Uri.parse(it) }
+    }
 
     /** Voce da mostrare negli elenchi di Android Auto (senza indirizzo: lo si ricava al momento del play). */
     fun browseItem(st: Station): MediaItem {
