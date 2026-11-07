@@ -498,6 +498,27 @@ private fun LoudnessCard(env: AppEnv, s: DspSettings, m: ModInfo) {
 }
 
 @Composable
+private fun DvcCard(env: AppEnv, s: DspSettings, m: ModInfo) {
+    val st = env.settings
+    val info = env.engine.eqProcessor.info
+    val sub = when {
+        !m.on -> m.sub
+        !s.master -> "Accendi il DSP per usarlo"
+        info.headroomDb > 0.05f -> String.format(Locale.ITALY, "Volume %.0f dB · rinforzo oltre il volume: -%.1f dB", s.dvcDb, info.headroomDb)
+        else -> String.format(Locale.ITALY, "Volume %.0f dB · i rinforzi stanno nel margine del volume", s.dvcDb)
+    }
+    ModCard(env, m, sub) {
+        LabeledSlider("Volume", s.dvcDb, DspSettings.DVC_MIN_DB..0f, "${s.dvcDb.roundToInt()} dB") { v ->
+            st.updateDsp { it.copy(dvcDb = v.roundToInt().toFloat()) }
+        }
+        Text(
+            "Con l'app aperta i tasti del volume regolano questo volume (passi di 2 dB).",
+            color = Ml.textFaint, fontSize = 12.sp
+        )
+    }
+}
+
+@Composable
 private fun LimiterCard(env: AppEnv, s: DspSettings, m: ModInfo) {
     val st = env.settings
     val red by produceState(0f, s.limiter) {
