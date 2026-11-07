@@ -5,7 +5,7 @@ App Android per ascoltare le radio di tutto il mondo.
 - Radio di tutto il mondo da [Radio Browser](https://www.radio-browser.info): scegli il paese, poi (se disponibile) la regione; cerca per nome, paese, regione o genere; ordine per ascolti.
 - Preferiti (schermata iniziale), cronologia dei brani, radio personalizzate con indirizzo del flusso.
 - Player in stile DAB: logo, nome, brano in onda (ICY), codec, bitrate, frequenza, canali, volume.
-- Equalizzatore di [MLEqualizer](https://github.com/marco90-cyber/Mleq): grafico a 3, 5, 7, 10, 15 o 31 bande modificabile nella pagina, preamp, toni come Poweramp (frequenza e Q), Analog Bass, Hi-Res Air, Clarity, Surround+ e stereo, DBFB, loudness legata al volume, headroom automatico, filtro anti-DC, saturazione morbida e limiter true-peak; preset AutoEQ/Poweramp.
+- Equalizzatore di [MLEqualizer](https://github.com/marco90-cyber/Mleq): Parametrico (16 filtri), AutoEQ (oltre 8800 cuffie incluse) e grafico a 3, 5, 7, 10, 15 o 31 bande nella pagina, preamp, toni come Poweramp (frequenza e Q), Analog Bass, Hi-Res Air, Clarity, Surround+ e stereo, DBFB, loudness legata al volume, headroom automatico, filtro anti-DC, saturazione morbida e limiter true-peak; preset AutoEQ/Poweramp.
 - Material You, tema chiaro/scuro automatico. Android Auto.
 - Pausa durante le chiamate e quando si scollegano le cuffie, ripresa al ricollegamento Bluetooth.
 
