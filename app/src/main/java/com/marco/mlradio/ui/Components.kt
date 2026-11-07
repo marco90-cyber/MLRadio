@@ -33,6 +33,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -115,8 +116,14 @@ fun StationLogo(logoUrl: String?, size: Dp, modifier: Modifier = Modifier, onErr
     val url = logoUrl.orEmpty()
     Box(modifier.size(size), contentAlignment = Alignment.Center) {
         if (url.startsWith("http") || url.startsWith("file:")) {
+            val ctx = androidx.compose.ui.platform.LocalContext.current
+            val request = remember(url) {
+                coil.request.ImageRequest.Builder(ctx).data(url)
+                    .transformations(com.marco.mlradio.data.TrimTransformation())
+                    .build()
+            }
             SubcomposeAsyncImage(
-                model = url,
+                model = request,
                 contentDescription = null,
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.size(size),

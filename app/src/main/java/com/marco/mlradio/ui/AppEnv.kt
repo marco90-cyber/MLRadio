@@ -31,6 +31,9 @@ class AppEnv(val app: MLRadioApp) {
     /** Radio di cui si sta cambiando il logo (finestra «Cambia logo»). */
     var logoFor by mutableStateOf<Station?>(null)
 
+    /** Radio per cui si cerca il logo sul web (pagina di ricerca immagini). */
+    var webLogoFor by mutableStateOf<Station?>(null)
+
     val explore = ExploreState(this)
 
     /** Curva calcolata dal motore nativo per l'equalizzatore. */

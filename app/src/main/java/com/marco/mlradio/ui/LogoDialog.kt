@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -70,6 +71,9 @@ fun LogoDialog(env: AppEnv, st: Station, onDismiss: () -> Unit) {
                         modifier = Modifier.fillMaxWidth()
                     )
                 } else {
+                    Option(Icons.Filled.Search, "Cerca sul web") {
+                        env.webLogoFor = st; onDismiss()
+                    }
                     Option(Icons.Filled.Image, "Scegli dalla galleria") {
                         picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                     }

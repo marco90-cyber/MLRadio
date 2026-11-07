@@ -102,6 +102,7 @@ fun MainScreen(env: AppEnv) {
         }
         if (env.addDialog) AddStationDialog(env) { env.addDialog = false }
         env.logoFor?.let { st -> LogoDialog(env, st) { env.logoFor = null } }
+        env.webLogoFor?.let { st -> WebLogoScreen(st) { env.webLogoFor = null } }
     }
 }
 }

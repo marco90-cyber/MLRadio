@@ -95,19 +95,56 @@ object Logos {
 
     /** Copia (ridotta) di un'immagine scelta dalla galleria. */
     suspend fun setCustomImage(context: Context, uuid: String, uri: Uri): Boolean = withContext(Dispatchers.IO) {
+        val bmp = try {
+            context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+        } catch (e: Exception) {
+            AppLog.w("Loghi", "Immagine non valida", e); null
+        } ?: return@withContext false
+        setCustomBitmap(uuid, bmp)
+    }
+
+    /** Salva un'immagine come logo: bordi vuoti rifilati, ridotta a 512 px. */
+    suspend fun setCustomBitmap(uuid: String, src: Bitmap): Boolean = withContext(Dispatchers.IO) {
         try {
-            val bmp = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) } ?: return@withContext false
+            val bmp = LogoTrim.trim(src)
             val scale = minOf(1f, 512f / maxOf(bmp.width, bmp.height))
-            val out = if (scale < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true) else bmp
+            val out = if (scale < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt().coerceAtLeast(1), (bmp.height * scale).toInt().coerceAtLeast(1), true) else bmp
             val f = File(dir, "$uuid-${System.currentTimeMillis()}.png")
             f.outputStream().use { out.compress(Bitmap.CompressFormat.PNG, 100, it) }
             dir.listFiles()?.filter { it.name.startsWith("$uuid-") && it != f }?.forEach { it.delete() }
             withContext(Dispatchers.Main) { setCustomUrl(uuid, Uri.fromFile(f).toString()) }
             true
         } catch (e: Exception) {
-            AppLog.w("Loghi", "Immagine non valida", e)
+            AppLog.w("Loghi", "Salvataggio del logo non riuscito", e)
             false
         }
+    }
+
+    /** Scarica un'immagine dal web (anche «data:» base64) e la usa come logo. */
+    suspend fun setCustomFromWeb(uuid: String, url: String, referer: String?): Boolean = withContext(Dispatchers.IO) {
+        val bmp = try {
+            if (url.startsWith("data:")) {
+                val b64 = url.substringAfter("base64,", "")
+                if (b64.isEmpty()) null else {
+                    val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                }
+            } else {
+                val c = (java.net.URL(url).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 10000; readTimeout = 15000; instanceFollowRedirects = true
+                    setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Mobile Safari/537.36")
+                    if (referer != null) setRequestProperty("Referer", referer)
+                }
+                try {
+                    if (c.responseCode in 200..299) c.inputStream.use { BitmapFactory.decodeStream(it) } else null
+                } finally {
+                    c.disconnect()
+                }
+            }
+        } catch (e: Exception) {
+            AppLog.w("Loghi", "Download del logo non riuscito", e); null
+        } ?: return@withContext false
+        setCustomBitmap(uuid, bmp)
     }
 
     fun clearCustom(uuid: String) {
@@ -251,4 +288,55 @@ object LogoFinder {
     } catch (_: Exception) {
         false
     }
+}
+
+/** Toglie i bordi vuoti (trasparenti o del colore dello sfondo) attorno a un logo. */
+object LogoTrim {
+    fun trim(src: Bitmap, tolerance: Int = 24): Bitmap {
+        val w = src.width
+        val h = src.height
+        if (w < 8 || h < 8) return src
+        val bmp = if (src.config == Bitmap.Config.HARDWARE) src.copy(Bitmap.Config.ARGB_8888, false) else src
+        val px = IntArray(w * h)
+        bmp.getPixels(px, 0, w, 0, 0, w, h)
+        val bg = px[0]
+        fun empty(c: Int): Boolean {
+            val a = c ushr 24
+            if (a < 16) return true
+            if ((bg ushr 24) < 16) return false
+            val dr = ((c shr 16) and 255) - ((bg shr 16) and 255)
+            val dg = ((c shr 8) and 255) - ((bg shr 8) and 255)
+            val db = (c and 255) - (bg and 255)
+            return kotlin.math.abs(dr) <= tolerance && kotlin.math.abs(dg) <= tolerance && kotlin.math.abs(db) <= tolerance
+        }
+        var top = 0; var bottom = h - 1; var left = 0; var right = w - 1
+        fun rowEmpty(y: Int) = (0 until w).all { empty(px[y * w + it]) }
+        fun colEmpty(x: Int, y0: Int, y1: Int) = (y0..y1).all { empty(px[it * w + x]) }
+        while (top < bottom && rowEmpty(top)) top++
+        while (bottom > top && rowEmpty(bottom)) bottom--
+        while (left < right && colEmpty(left, top, bottom)) left++
+        while (right > left && colEmpty(right, top, bottom)) right--
+        val cw = right - left + 1
+        val ch = bottom - top + 1
+        // nulla da togliere, o immagine quasi vuota: si lascia com'è
+        if ((cw >= w - 2 && ch >= h - 2) || cw < w / 10 || ch < h / 10) return bmp
+        // un filo di margine e forma quadrata, così il logo resta centrato
+        val side = maxOf(cw, ch)
+        val pad = side / 20
+        val size = side + pad * 2
+        val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(out)
+        if ((bg ushr 24) >= 16) canvas.drawColor(bg)
+        canvas.drawBitmap(
+            bmp, android.graphics.Rect(left, top, right + 1, bottom + 1),
+            android.graphics.Rect(pad + (side - cw) / 2, pad + (side - ch) / 2, pad + (side - cw) / 2 + cw, pad + (side - ch) / 2 + ch), null
+        )
+        return out
+    }
+}
+
+/** Trasformazione di Coil: rifila i bordi vuoti dei loghi scaricati, così riempiono il riquadro. */
+class TrimTransformation : coil.transform.Transformation {
+    override val cacheKey: String = "mlradio-trim-1"
+    override suspend fun transform(input: Bitmap, size: coil.size.Size): Bitmap = LogoTrim.trim(input)
 }
