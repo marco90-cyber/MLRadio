@@ -95,7 +95,7 @@ class PlaybackService : MediaLibraryService() {
      * Il player visto da notifica e Android Auto: «precedente/successiva» passano alla radio
      * precedente/successiva dell'elenco da cui si è partiti (preferiti, paese, regione...).
      */
-    private class RadioPlayer(private val app: MLRadioApp) : ForwardingPlayer(app.engine.player) {
+    private class RadioPlayer(private val app: MLRadioApp) : ForwardingPlayer(app.engine.controls) {
         private val extra = Player.Commands.Builder()
             .addAll(
                 Player.COMMAND_SEEK_TO_NEXT, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,

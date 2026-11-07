@@ -55,6 +55,9 @@ class Settings(context: Context) {
     var themeMode by IntPref(sp, "theme_mode", 0)
     var dynamicColor by BoolPref(sp, "dynamic_color", true)
 
+    /** Curva dell'equalizzatore fissata in alto: scorrendo diventa una striscia compatta. */
+    var curvePinned by BoolPref(sp, "curve_pinned", true)
+
     // Comportamento
     var resumeOnConnect by BoolPref(sp, "resume_on_connect", true)
     var hapticScreen by BoolPref(sp, "haptic_screen", true)

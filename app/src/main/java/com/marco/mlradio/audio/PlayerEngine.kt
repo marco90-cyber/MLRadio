@@ -57,6 +57,9 @@ class PlayerEngine(
 
     val player: ExoPlayer
 
+    /** Player con le dissolvenze (play e pausa senza click): lo usano l'app e la sessione multimediale. */
+    val controls: FadingPlayer
+
     private val main = Handler(Looper.getMainLooper())
 
     var currentStation by mutableStateOf<Station?>(null)
@@ -143,6 +146,8 @@ class PlayerEngine(
             .setHandleAudioBecomingNoisy(true) // pausa se si staccano le cuffie
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
+        // nessun volume dell'app: la dissolvenza lavora sul volume pieno
+        controls = FadingPlayer(player, { settings.dsp.fades }) { 1f }
 
         eqProcessor.setSettings(settings.dsp)
         settings.onDspChanged = { cfg ->
@@ -439,7 +444,7 @@ class PlayerEngine(
         ) {
             startStation(st)
         } else {
-            player.play()
+            controls.play()
         }
     }
 
@@ -451,7 +456,7 @@ class PlayerEngine(
             refreshState()
             return
         }
-        if (wantsPlay) player.pause() else resume()
+        if (wantsPlay) controls.pause() else resume()
     }
 
     /** Riprende dopo la riconnessione di cuffie/Bluetooth, solo se la pausa era dovuta allo scollegamento. */
@@ -540,6 +545,18 @@ class PlayerEngine(
         } catch (_: Throwable) {
             eqProcessor.listenVolume = 1.0
         }
+    }
+
+
+    // ------------------------------------------------------------------ volume digitale (DVC)
+
+    /** Alza o abbassa il volume digitale di 2 dB; false se il DVC è spento (allora decide Android). */
+    fun stepDvc(up: Boolean): Boolean {
+        val s = settings.dsp
+        if (!s.master || !s.dvc) return false
+        val v = (s.dvcDb + if (up) 2f else -2f).coerceIn(DspSettings.DVC_MIN_DB, 0f)
+        if (v != s.dvcDb) settings.updateDsp { it.copy(dvcDb = v) }
+        return true
     }
 
 }

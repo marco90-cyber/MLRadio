@@ -140,7 +140,9 @@ class EqAudioProcessor : BaseAudioProcessor() {
         val s = pending
         val rgInfo = replayGain ?: scannedGain
         val rgDb = ReplayGain.gainDb(rgInfo, s.replayGain)
-        dsp.setParams(s.toNative(rgDb, listenVolume))
+        // con il DVC l'ascolto reale è volume del telefono × volume digitale (serve alla loudness)
+        val heard = if (s.dvc) listenVolume * Math.pow(10.0, s.dvcDb / 20.0) else listenVolume
+        dsp.setParams(s.toNative(rgDb, heard))
         bypass = !s.master
         appliedVersion = v
         val m = dsp.meters(false)  // [limiter, headroom, ingresso, stadi]
@@ -226,6 +228,7 @@ class EqAudioProcessor : BaseAudioProcessor() {
             if (s.dcBlock) add("Anti-DC")
             if (s.softSat) add("Saturazione morbida")
             if (s.limiter) add("Limiter")
+            if (s.dvc) add("Volume digitale")
         }
     }
 }
