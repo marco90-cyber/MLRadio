@@ -16,6 +16,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.runtime.derivedStateOf
+import com.marco.mlradio.data.Continent
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -65,10 +70,13 @@ import kotlinx.coroutines.delay
 fun ExploreScreen(env: AppEnv) {
     val ex = env.explore
     LaunchedEffect(Unit) { ex.loadCountries() }
+    val country = ex.country
+    val continent = ex.continent
     val title = when {
         ex.customOpen -> "Le mie radio"
         ex.global -> "Ricerca nel mondo"
-        ex.country != null -> ex.country!!.let { it.flag + " " + it.localName }
+        country != null -> country.flag + " " + country.localName
+        continent != null -> continent.emoji + " " + continent.name
         else -> "Esplora"
     }
     Column(Modifier.fillMaxSize()) {
@@ -90,27 +98,40 @@ fun ExploreScreen(env: AppEnv) {
         when {
             ex.customOpen -> CustomList(env)
             ex.inStations -> StationList(env)
-            else -> CountryList(env)
+            else -> CountryList(env, continent)
         }
     }
 }
 
+/**
+ * Pagina iniziale (continent == null): ricerca, «Le mie radio», il paese del telefono e i continenti.
+ * Con un continente aperto: l'elenco dei suoi paesi. Scrivendo nella ricerca si filtrano i paesi
+ * (di tutto il mondo nella pagina iniziale) e si può cercare una radio per nome in tutto il mondo.
+ */
 @Composable
-private fun CountryList(env: AppEnv) {
+private fun CountryList(env: AppEnv, continent: Continent?) {
     val ex = env.explore
     val q = ex.countryQuery.trim()
-    val filtered = remember(ex.countries, q) {
-        if (q.isEmpty()) ex.countries
-        else ex.countries.filter { it.localName.contains(q, ignoreCase = true) || it.name.contains(q, ignoreCase = true) }
+    val base = remember(ex.countries, continent) {
+        if (continent == null) ex.countries else ex.countriesOf(continent)
     }
+    val filtered = remember(base, q) {
+        if (q.isEmpty()) base
+        else base.filter { c ->
+            c.localName.contains(q, ignoreCase = true) || c.names.any { it.contains(q, ignoreCase = true) } ||
+                c.code.equals(q, ignoreCase = true)
+        }
+    }
+    val summary = remember(ex.countries) { ex.continentSummary() }
+    val home = remember(ex.countries) { ex.homeCountry }
     LazyColumn(Modifier.fillMaxSize()) {
-        item {
+        item(key = "search") {
             OutlinedTextField(
                 value = ex.countryQuery,
                 onValueChange = { ex.countryQuery = it },
                 singleLine = true,
                 shape = RoundedCornerShape(28.dp),
-                placeholder = { Text("Cerca un paese o una radio") },
+                placeholder = { Text(if (continent == null) "Cerca un paese o una radio" else "Cerca in ${continent.name}") },
                 leadingIcon = { Icon(Icons.Filled.Search, null) },
                 trailingIcon = {
                     if (ex.countryQuery.isNotEmpty()) {
@@ -125,7 +146,7 @@ private fun CountryList(env: AppEnv) {
             )
         }
         if (q.length >= 2) {
-            item {
+            item(key = "global") {
                 ListItem(
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                     modifier = Modifier.clickable { ex.openGlobalSearch(q) },
@@ -134,8 +155,8 @@ private fun CountryList(env: AppEnv) {
                     supportingContent = { Text("Per nome della radio") },
                 )
             }
-        } else {
-            item {
+        } else if (continent == null) {
+            item(key = "custom") {
                 ListItem(
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                     modifier = Modifier.clickable { ex.customOpen = true },
@@ -147,14 +168,25 @@ private fun CountryList(env: AppEnv) {
                     },
                 )
             }
+            if (home != null) {
+                item(key = "home") {
+                    ListItem(
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        modifier = Modifier.clickable { ex.openCountry(home) },
+                        leadingContent = { Text(home.flag, fontSize = 28.sp) },
+                        headlineContent = { Text("Il tuo paese: ${home.localName}") },
+                        supportingContent = { Text("${home.count} radio · filtra per regione") },
+                    )
+                }
+            }
         }
         when {
-            ex.countriesLoading && ex.countries.isEmpty() -> item {
+            ex.countriesLoading && ex.countries.isEmpty() -> item(key = "loading") {
                 Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
             }
-            ex.countriesError != null && ex.countries.isEmpty() -> item {
+            ex.countriesError != null && ex.countries.isEmpty() -> item(key = "error") {
                 Column(
                     Modifier.fillMaxWidth().padding(32.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
@@ -164,10 +196,29 @@ private fun CountryList(env: AppEnv) {
                     Button(onClick = { ex.loadCountries(force = true) }) { Text("Riprova") }
                 }
             }
+            continent == null && q.isEmpty() -> {
+                item(key = "continents-title") { SectionTitle("Continenti") }
+                items(summary, key = { "cont-" + it.first.id }) { (c, nCountries, nStations) ->
+                    ListItem(
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        modifier = Modifier.clickable { ex.openContinent(c) },
+                        leadingContent = { Text(c.emoji, fontSize = 28.sp) },
+                        headlineContent = { Text(c.name) },
+                        supportingContent = { Text("$nCountries paesi · $nStations radio") },
+                        trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) },
+                    )
+                }
+            }
             else -> {
-                items(filtered, key = { it.code }) { c -> CountryRow(c) { ex.openCountry(c) } }
+                if (continent != null && q.isEmpty()) {
+                    item(key = "countries-title") {
+                        SectionTitle("${filtered.size} paesi · ${filtered.sumOf { it.count }} radio")
+                    }
+                }
+                // chiave con prefisso + indice di riserva: due righe con la stessa chiave fanno crashare la lista
+                itemsIndexed(filtered, key = { i, c -> "c-${c.code}-$i" }) { _, c -> CountryRow(c) { ex.openCountry(c) } }
                 if (filtered.isEmpty() && q.isNotEmpty() && ex.countries.isNotEmpty()) {
-                    item {
+                    item(key = "none") {
                         Text(
                             "Nessun paese trovato.",
                             modifier = Modifier.fillMaxWidth().padding(24.dp),
@@ -182,6 +233,16 @@ private fun CountryList(env: AppEnv) {
 }
 
 @Composable
+private fun SectionTitle(text: String) {
+    Text(
+        text,
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary
+    )
+}
+
+@Composable
 private fun CountryRow(c: Country, onClick: () -> Unit) {
     ListItem(
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
@@ -189,6 +250,7 @@ private fun CountryRow(c: Country, onClick: () -> Unit) {
         leadingContent = { Text(c.flag, fontSize = 28.sp) },
         headlineContent = { Text(c.localName) },
         supportingContent = { Text("${c.count} radio") },
+        trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) },
     )
 }
 
@@ -244,13 +306,40 @@ private fun StationList(env: AppEnv) {
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         )
+        // Regioni: una riga di filtri sempre visibile (scorre in orizzontale)
+        if (!ex.global && (ex.regions.isNotEmpty() || ex.regionsLoading)) {
+            Row(
+                Modifier
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                FilterChip(
+                    selected = ex.region.isEmpty(),
+                    onClick = { if (ex.region.isNotEmpty()) ex.selectRegion("") },
+                    label = { Text("Tutte le regioni") },
+                )
+                if (ex.regions.isEmpty()) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Text("Carico le regioni…", style = MaterialTheme.typography.labelMedium)
+                }
+                for (r in ex.regions) {
+                    FilterChip(
+                        selected = ex.region == r.name,
+                        onClick = { ex.selectRegion(if (ex.region == r.name) "" else r.name) },
+                        label = { Text("${r.name} · ${r.count}", maxLines = 1) },
+                    )
+                }
+            }
+        }
         Row(
             Modifier
                 .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            if (ex.regions.isNotEmpty() && !ex.global) {
+            if (ex.regions.size > 6 && !ex.global) {
                 FilterDropdown(
                     label = "Regione",
                     valueLabel = ex.region.ifEmpty { null },
@@ -286,8 +375,20 @@ private fun StationList(env: AppEnv) {
         } else {
             Spacer(Modifier.height(8.dp))
         }
-        LazyColumn(Modifier.fillMaxSize()) {
-            items(stations, key = { it.uuid }) { st -> StationItem(env, st, stations) }
+        val listState = rememberLazyListState()
+        // lista completa: arrivati quasi in fondo si caricano automaticamente le radio successive
+        val nearEnd by remember {
+            derivedStateOf {
+                val info = listState.layoutInfo
+                val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+                info.totalItemsCount > 0 && last >= info.totalItemsCount - 15
+            }
+        }
+        LaunchedEffect(nearEnd, ex.hasMore, ex.loading) {
+            if (nearEnd && ex.hasMore && !ex.loading && ex.error == null) ex.loadMore()
+        }
+        LazyColumn(Modifier.fillMaxSize(), state = listState) {
+            itemsIndexed(stations, key = { i, st -> "s-${st.uuid}-$i" }) { _, st -> StationItem(env, st, stations) }
             item {
                 Column(
                     Modifier.fillMaxWidth().padding(16.dp),
@@ -326,7 +427,7 @@ private fun CustomList(env: AppEnv) {
         return
     }
     LazyColumn(Modifier.fillMaxSize()) {
-        items(list, key = { it.uuid }) { st ->
+        itemsIndexed(list, key = { i, st -> "m-${st.uuid}-$i" }) { _, st ->
             StationItem(
                 env, st, list,
                 trailingExtra = {

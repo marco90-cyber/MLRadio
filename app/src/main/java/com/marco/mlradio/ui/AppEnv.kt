@@ -22,7 +22,16 @@ class AppEnv(val app: MLRadioApp) {
     val history: HistoryStore get() = app.history
 
     /** 0 Preferiti, 1 Esplora, 2 Cronologia, 3 Impostazioni */
-    var tab by mutableIntStateOf(0)
+    private var tabState by mutableIntStateOf(0)
+    var tab: Int
+        get() = tabState
+        set(v) {
+            if (v != tabState) {
+                val names = listOf("Preferiti", "Esplora", "Cronologia", "Impostazioni")
+                com.marco.mlradio.util.AppLog.i("UI", "Scheda: ${names.getOrElse(v) { v.toString() }}")
+            }
+            tabState = v
+        }
     var showPlayer by mutableStateOf(false)
     var showEq by mutableStateOf(false)
     var showAbout by mutableStateOf(false)

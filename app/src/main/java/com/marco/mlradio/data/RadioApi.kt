@@ -14,8 +14,15 @@ import kotlinx.coroutines.CancellationException
 import java.net.URLEncoder
 import java.text.Collator
 import java.util.Locale
+import com.marco.mlradio.util.AppLog
 
-data class Country(val name: String, val code: String, val count: Int) {
+/**
+ * Paese di Radio Browser. [names] sono tutti i nomi con cui il server lo elenca
+ * (a volte lo stesso codice compare più volte con nomi diversi).
+ */
+data class Country(val name: String, val code: String, val count: Int, val names: List<String> = listOf(name)) {
+    val continent: Continent get() = Continents.of(code)
+
     val localName: String
         get() {
             val n = Locale("", code).getDisplayCountry(Locale.ITALIAN)
@@ -83,31 +90,61 @@ object RadioApi {
         var last: Exception? = null
         for (k in servers.indices) {
             val idx = (preferred + k) % servers.size
+            val host = servers[idx].removePrefix("https://")
+            val t0 = System.currentTimeMillis()
             try {
                 val text = httpGet(servers[idx] + path)
                 preferred = idx
+                AppLog.i("Rete", "GET $host${shorten(path)} → ${text.length / 1024} KB in ${System.currentTimeMillis() - t0} ms")
                 return text
             } catch (e: Exception) {
+                AppLog.w("Rete", "GET $host${shorten(path)} fallita dopo ${System.currentTimeMillis() - t0} ms: ${e.javaClass.simpleName}: ${e.message}")
                 last = e
             }
         }
+        AppLog.e("Rete", "Nessun server Radio Browser ha risposto per ${shorten(path)}")
         throw last ?: IOException("Nessun server raggiungibile")
     }
 
+    private fun shorten(path: String) = if (path.length > 160) path.take(160) + "…" else path
+
     /** Elenco dei paesi con il numero di radio. Il paese del telefono è in cima, poi ordine alfabetico. */
     suspend fun countries(): List<Country> = withContext(Dispatchers.IO) {
-        val a = JSONArray(get("/json/countries"))
-        val list = ArrayList<Country>(a.length())
+        parseCountries(get("/json/countries"), Locale.getDefault().country)
+    }
+
+    /**
+     * Legge l'elenco dei paesi e unisce le voci con lo stesso codice ISO (il server a volte ne restituisce
+     * più di una: due righe con la stessa chiave mandavano in crash l'elenco di Esplora).
+     */
+    fun parseCountries(json: String, phoneCountry: String): List<Country> {
+        val a = JSONArray(json)
+        class Acc(var count: Int = 0, val names: LinkedHashMap<String, Int> = LinkedHashMap())
+        val byCode = LinkedHashMap<String, Acc>()
+        var rows = 0
         for (i in 0 until a.length()) {
             val o = a.optJSONObject(i) ?: continue
             val code = o.optString("iso_3166_1").trim().uppercase(Locale.ROOT)
             val name = o.optString("name").trim()
             val n = o.optInt("stationcount", 0)
-            if (code.length == 2 && name.isNotEmpty() && n > 0) list.add(Country(name, code, n))
+            if (code.length != 2 || !code.all { it in 'A'..'Z' } || name.isEmpty() || n <= 0) continue
+            rows++
+            val acc = byCode.getOrPut(code) { Acc() }
+            acc.count += n
+            acc.names[name] = (acc.names[name] ?: 0) + n
         }
-        val here = Locale.getDefault().country.uppercase(Locale.ROOT)
+        val dup = byCode.filterValues { it.names.size > 1 }
+        if (dup.isNotEmpty()) {
+            AppLog.w("Esplora", "Paesi doppi dal server, uniti: " + dup.entries.joinToString { "${it.key}=${it.value.names.keys}" })
+        }
+        val list = byCode.map { (code, acc) ->
+            val names = acc.names.entries.sortedByDescending { it.value }.map { it.key }
+            Country(names.first(), code, acc.count, names)
+        }
+        val here = phoneCountry.uppercase(Locale.ROOT)
         val collator = Collator.getInstance(Locale.ITALIAN)
-        list.sortedWith { x, y ->
+        AppLog.i("Esplora", "Paesi: $rows voci dal server → ${list.size} paesi, ${list.sumOf { it.count }} radio")
+        return list.sortedWith { x, y ->
             val xh = x.code == here
             val yh = y.code == here
             when {
@@ -117,31 +154,35 @@ object RadioApi {
         }
     }
 
-    /** Regioni/stati di un paese (il nome inglese del paese, come in elenco). Vuoto se non disponibili. */
-    suspend fun states(countryName: String, countryCode: String): List<RegionInfo> = withContext(Dispatchers.IO) {
-        val c = enc(countryName).replace("+", "%20")
-        // Più percorsi: il formato accettato dal server cambia fra versioni; l'elenco completo è l'ultima risorsa.
-        val paths = listOf("/json/states/$c", "/json/states/$c/", "/json/states")
+    /** Regioni/stati di un paese (tutti i nomi inglesi con cui il server lo conosce). Vuoto se non disponibili. */
+    suspend fun states(country: Country): List<RegionInfo> = withContext(Dispatchers.IO) {
+        val wanted = country.names.map { it.lowercase(Locale.ROOT) }.toSet()
+        val raw = ArrayList<Pair<String, Int>>()
         var result = emptyList<RegionInfo>()
-        for (path in paths) {
-            val text = try {
-                get(path)
-            } catch (_: Exception) {
-                continue
-            }
-            val raw = ArrayList<Pair<String, Int>>()
-            try {
-                val a = JSONArray(text)
-                for (i in 0 until a.length()) {
-                    val o = a.optJSONObject(i) ?: continue
-                    if (!o.optString("country").trim().equals(countryName, ignoreCase = true)) continue
-                    raw += o.optString("name") to o.optInt("stationcount", 0)
+        for (name in country.names.take(3)) {
+            val c = enc(name).replace("+", "%20")
+            // Più percorsi: il formato accettato dal server cambia fra versioni.
+            for (path in listOf("/json/states/$c", "/json/states/$c/")) {
+                val text = try {
+                    get(path)
+                } catch (_: Exception) {
+                    continue
                 }
-            } catch (_: Exception) {
+                try {
+                    val a = JSONArray(text)
+                    for (i in 0 until a.length()) {
+                        val o = a.optJSONObject(i) ?: continue
+                        if (o.optString("country").trim().lowercase(Locale.ROOT) !in wanted) continue
+                        raw += o.optString("name") to o.optInt("stationcount", 0)
+                    }
+                } catch (e: Exception) {
+                    AppLog.w("Esplora", "Risposta regioni non leggibile ($path)", e)
+                }
+                break
             }
-            result = Regions.merge(raw, countryCode, countryName)
-            if (result.size > 1) break
         }
+        result = Regions.merge(raw.distinct(), country.code, country.name)
+        AppLog.i("Esplora", "Regioni di ${country.code}: ${raw.size} voci grezze → ${result.size} regioni")
         result
     }
 

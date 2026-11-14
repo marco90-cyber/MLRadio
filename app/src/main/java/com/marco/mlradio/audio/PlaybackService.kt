@@ -249,7 +249,7 @@ class PlaybackService : MediaLibraryService() {
         private suspend fun regionsOf(code: String): List<com.marco.mlradio.data.RegionInfo> {
             regionCache[code]?.let { return it }
             val country = countries().firstOrNull { it.code == code } ?: return emptyList()
-            return RadioApi.states(country.name, code).also { if (it.isNotEmpty()) regionCache[code] = it }
+            return RadioApi.states(country).also { if (it.isNotEmpty()) regionCache[code] = it }
         }
 
         private suspend fun children(parentId: String): List<MediaItem> {

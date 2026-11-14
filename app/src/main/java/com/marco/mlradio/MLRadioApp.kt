@@ -40,7 +40,8 @@ class MLRadioApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        AppLog.init(this)
+        AppLog.init(this, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)
+        registerActivityLifecycleCallbacks(LifecycleLogger)
         settings = Settings(this)
         AppLog.verbose = settings.verboseLog
         com.marco.mlradio.data.Logos.init(this, appScope)
@@ -54,6 +55,29 @@ class MLRadioApp : Application() {
         ConnectionResume.register(this, engine, settings)
 
         appScope.launch { refreshFavorites() }
+        AppLog.i("App", "Avvio completato: ${favorites.items.size} preferiti, ${custom.items.size} radio personali")
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        AppLog.i("App", "Sistema: richiesta di liberare memoria (livello $level)")
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        AppLog.w("App", "Sistema: memoria quasi esaurita")
+    }
+
+    /** Registra apertura/chiusura delle schermate (utile per capire cosa succedeva prima di un errore). */
+    private object LifecycleLogger : android.app.Application.ActivityLifecycleCallbacks {
+        override fun onActivityCreated(a: android.app.Activity, b: android.os.Bundle?) =
+            AppLog.i("Ciclo", "${a.javaClass.simpleName} creata${if (b != null) " (ripristinata)" else ""}")
+        override fun onActivityStarted(a: android.app.Activity) = AppLog.d("Ciclo", "${a.javaClass.simpleName} visibile")
+        override fun onActivityResumed(a: android.app.Activity) = AppLog.i("Ciclo", "${a.javaClass.simpleName} in primo piano")
+        override fun onActivityPaused(a: android.app.Activity) = AppLog.i("Ciclo", "${a.javaClass.simpleName} in pausa")
+        override fun onActivityStopped(a: android.app.Activity) = AppLog.d("Ciclo", "${a.javaClass.simpleName} nascosta")
+        override fun onActivitySaveInstanceState(a: android.app.Activity, b: android.os.Bundle) {}
+        override fun onActivityDestroyed(a: android.app.Activity) = AppLog.i("Ciclo", "${a.javaClass.simpleName} chiusa")
     }
 
     /**
